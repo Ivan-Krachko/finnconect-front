@@ -4,19 +4,20 @@ import * as autenticacionService from "../Services/autenticacion.service";
 export const autenticacionContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
 
   const signIn = async (email, password) => {
-    const response = await autenticacionService.login(email, password);
-    setUser(response.user);
+    const result = await autenticacionService.login(email, password);
+    setToken(result.token);
+    return result;
   };
 
   const signOut = () => {
-    setUser(null);
+    setToken(null);
   };
 
   return (
-    <autenticacionContext.Provider value={{ user, signIn, signOut }}>
+    <autenticacionContext.Provider value={{ token, signIn, signOut }}>
       {children}
     </autenticacionContext.Provider>
   );

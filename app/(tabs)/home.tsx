@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useContext, useState } from "react";
 import {
   Platform,
   Pressable,
@@ -11,16 +12,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import * as cuentasService from "../../src/Services/cuentas.service";
+import * as movimientosService from "../../src/Services/movimientos.service";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
-
-interface Transaction {
-  id: string;
-  icon: IconName;
-  label: string;
-  amount: number;
-  date: string;
-}
 
 interface QuickAction {
   icon: IconName;
@@ -28,44 +24,6 @@ interface QuickAction {
   route: string | null;
   bg: string;
 }
-
-const TRANSACTIONS: Transaction[] = [
-  {
-    id: "1",
-    icon: "cart-outline",
-    label: "Compras en Supermercado",
-    amount: -250120,
-    date: "12 Sept",
-  },
-  {
-    id: "2",
-    icon: "arrow-down-circle-outline",
-    label: "Depósito de Salario",
-    amount: 3500000,
-    date: "10 Sept",
-  },
-  {
-    id: "3",
-    icon: "flash-outline",
-    label: "Factura de Electricidad",
-    amount: -170292,
-    date: "08 Sept",
-  },
-  {
-    id: "4",
-    icon: "play-circle-outline",
-    label: "Suscripción Streaming",
-    amount: -150999,
-    date: "05 Sept",
-  },
-  {
-    id: "5",
-    icon: "swap-horizontal-outline",
-    label: "Transferencia Recibida",
-    amount: 167000,
-    date: "03 Sept",
-  },
-];
 
 const QUICK_ACTIONS: QuickAction[] = [
   {
@@ -118,7 +76,54 @@ function formatCurrency(amount: number): string {
 export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { token } = useContext(autenticacionContext);
   const [showBalance, setShowBalance] = useState(true);
+  const [saldoPrincipal, setSaldoPrincipal] = useState<number | null>(null);
+  const [movimientos, setMovimientos] = useState<
+    { id: number; label: string; amount: number; date: string }[]
+  >([]);
+
+  const fetchSaldo = useCallback(() => {
+    if (!token) return;
+    cuentasService
+      .getCuentas(token)
+      .then((data) => {
+        const ars = (data.items || []).find((c: { moneda: string }) => c.moneda === "ARS");
+        setSaldoPrincipal(ars ? parseFloat(ars.saldo) || 0 : 0);
+      })
+      .catch(() => setSaldoPrincipal(0));
+  }, [token]);
+
+  const fetchMovimientos = useCallback(() => {
+    if (!token) return;
+    movimientosService
+      .getMovimientos(token, { page: 1, pageSize: 5 })
+      .then((data) => {
+        const items = (data.items || []).map((m: any) => ({
+          id: m.id,
+          label: m.descripcion || `Transferencia ${m.tipoOperacion}`,
+          amount: m.sentido === "ingreso" ? parseFloat(m.monto) : -parseFloat(m.monto),
+          date: new Date(m.createdAt).toLocaleDateString("es-AR", {
+            day: "numeric",
+            month: "short",
+          }),
+        }));
+        setMovimientos(items);
+      })
+      .catch(() => setMovimientos([]));
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchSaldo();
+      fetchMovimientos();
+    }, [fetchSaldo, fetchMovimientos])
+  );
+
+  const displayBalance =
+    saldoPrincipal !== null
+      ? new Intl.NumberFormat("es-AR").format(Math.round(saldoPrincipal))
+      : "—";
 
   return (
     <View style={s.container}>
@@ -181,9 +186,9 @@ export default function Home() {
 
           <View style={s.amountRow}>
             <Text style={s.balanceAmount}>
-              {showBalance ? "$3,596,000" : "••••••••"}
+              {showBalance ? `$${displayBalance}` : "••••••••"}
             </Text>
-            {showBalance && <Text style={s.balanceCents}>.00</Text>}
+            {showBalance && saldoPrincipal !== null && <Text style={s.balanceCents}>.00</Text>}
           </View>
 
           <View style={s.trendRow}>
@@ -234,14 +239,14 @@ export default function Home() {
           </View>
 
           <View style={s.txCard}>
-            {TRANSACTIONS.map((tx, i) => {
+            {movimientos.map((tx, i) => {
               const isIncome = tx.amount > 0;
               return (
                 <View
                   key={tx.id}
                   style={[
                     s.txRow,
-                    i < TRANSACTIONS.length - 1 && s.txRowBorder,
+                    i < movimientos.length - 1 && s.txRowBorder,
                   ]}
                 >
                   <View
@@ -253,7 +258,7 @@ export default function Home() {
                     ]}
                   >
                     <Ionicons
-                      name={tx.icon}
+                      name="swap-horizontal-outline"
                       size={20}
                       color={isIncome ? "#1FA774" : "#E53935"}
                     />

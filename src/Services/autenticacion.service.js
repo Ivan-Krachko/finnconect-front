@@ -1,13 +1,24 @@
-const API_URL = "https://0065-2803-9800-98c0-7212-2c4c-f14d-6378-96ed.ngrok-free.app";
+import { API_HOST } from "../config/api";
 
 export const login = async (email, password) => {
-  const response = await fetch(`${API_URL}/auth/login`, {
+  const response = await fetch(`${API_HOST}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
     body: JSON.stringify({ email, password }),
   });
 
-  const data = await response.json();
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(
+      "La API no devolvió JSON válido. ¿La URL del host es correcta?"
+    );
+  }
 
   if (!response.ok) {
     throw new Error(data.message || "Error al iniciar sesión");

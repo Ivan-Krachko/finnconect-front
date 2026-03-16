@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -10,57 +11,71 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../src/context/AutenticacionContext";
+import * as movimientosService from "../src/Services/movimientos.service";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type FilterKey = "todas" | "ingresos" | "gastos";
 
-interface Transaction {
-  id: string;
-  label: string;
-  category: string;
-  icon: IconName;
-  iconColor: string;
-  amount: number;
-  date: string;
-  time: string;
+interface Movimiento {
+  id: number;
+  cuentaId: number;
+  tipoOperacion: string;
+  sentido: string;
+  monto: string;
+  descripcion: string | null;
+  createdAt: string;
 }
 
-const TRANSACTIONS: Transaction[] = [
-  { id: "1", label: "Compras en Supermercado", category: "Compras", icon: "cart-outline", iconColor: "#F59E0B", amount: -250120, date: "12 Sept", time: "18:34" },
-  { id: "2", label: "Depósito de Salario", category: "Ingresos", icon: "arrow-down-circle-outline", iconColor: "#1FA774", amount: 3500000, date: "10 Sept", time: "09:00" },
-  { id: "3", label: "Factura de Electricidad", category: "Servicios", icon: "flash-outline", iconColor: "#EF4444", amount: -170292, date: "08 Sept", time: "14:12" },
-  { id: "4", label: "Suscripción Streaming", category: "Entretenimiento", icon: "play-circle-outline", iconColor: "#8B5CF6", amount: -150999, date: "05 Sept", time: "00:00" },
-  { id: "5", label: "Transferencia Recibida", category: "Transferencia", icon: "swap-horizontal-outline", iconColor: "#3B82F6", amount: 167000, date: "03 Sept", time: "11:45" },
-  { id: "6", label: "Restaurante", category: "Gastronomía", icon: "restaurant-outline", iconColor: "#EC4899", amount: -32500, date: "02 Sept", time: "21:10" },
-  { id: "7", label: "Pago de Tarjeta", category: "Tarjeta", icon: "card-outline", iconColor: "#6B7280", amount: -890000, date: "01 Sept", time: "10:00" },
-  { id: "8", label: "Freelance Diseño", category: "Ingresos", icon: "arrow-down-circle-outline", iconColor: "#1FA774", amount: 450000, date: "28 Ago", time: "15:30" },
-  { id: "9", label: "Farmacia", category: "Salud", icon: "medkit-outline", iconColor: "#EF4444", amount: -18700, date: "27 Ago", time: "12:20" },
-  { id: "10", label: "Uber", category: "Transporte", icon: "car-outline", iconColor: "#6B7280", amount: -8900, date: "26 Ago", time: "08:45" },
-];
-
-const FILTERS: { key: FilterKey; label: string }[] = [
+const FILTERS: { key: FilterKey; label: string; sentido?: string }[] = [
   { key: "todas", label: "Todas" },
-  { key: "ingresos", label: "Ingresos" },
-  { key: "gastos", label: "Gastos" },
+  { key: "ingresos", label: "Ingresos", sentido: "ingreso" },
+  { key: "gastos", label: "Gastos", sentido: "egreso" },
 ];
 
 function fmtArs(n: number) {
   return new Intl.NumberFormat("es-AR").format(Math.abs(n));
 }
 
+function formatDate(iso: string) {
+  const d = new Date(iso);
+  return {
+    date: d.toLocaleDateString("es-AR", { day: "numeric", month: "short" }),
+    time: d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+
 export default function TransaccionesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { token } = useContext(autenticacionContext);
   const [filter, setFilter] = useState<FilterKey>("todas");
+  const [items, setItems] = useState<Movimiento[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = TRANSACTIONS.filter((t) => {
-    if (filter === "ingresos") return t.amount > 0;
-    if (filter === "gastos") return t.amount < 0;
-    return true;
-  });
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    const sentido = FILTERS.find((f) => f.key === filter)?.sentido;
+    movimientosService
+      .getMovimientos(token, { page: 1, pageSize: 50, sentido })
+      .then((data) => setItems(data.items || []))
+      .catch((e) => {
+        setError(e.message || "Error al cargar movimientos");
+        setItems([]);
+      })
+      .finally(() => setLoading(false));
+  }, [token, filter]);
 
-  const totalIngresos = TRANSACTIONS.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const totalGastos = TRANSACTIONS.filter((t) => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const totalIngresos = items
+    .filter((m) => m.sentido === "ingreso")
+    .reduce((s, m) => s + parseFloat(m.monto), 0);
+  const totalGastos = items
+    .filter((m) => m.sentido === "egreso")
+    .reduce((s, m) => s + parseFloat(m.monto), 0);
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -110,27 +125,42 @@ export default function TransaccionesScreen() {
         </View>
 
         {/* List */}
+        {loading ? (
+          <View style={s.loadingBox}>
+            <ActivityIndicator size="large" color="#1FA774" />
+            <Text style={s.loadingText}>Cargando movimientos...</Text>
+          </View>
+        ) : error ? (
+          <View style={s.empty}>
+            <Ionicons name="alert-circle" size={44} color="#EF4444" />
+            <Text style={s.emptyText}>{error}</Text>
+          </View>
+        ) : (
         <View style={s.listCard}>
-          {filtered.map((t, i) => {
-            const isIncome = t.amount > 0;
+          {items.map((t, i) => {
+            const isIncome = t.sentido === "ingreso";
+            const montoNum = parseFloat(t.monto);
+            const { date, time } = formatDate(t.createdAt);
+            const label = t.descripcion || `Transferencia ${t.tipoOperacion}`;
             return (
-              <View key={t.id} style={[s.row, i < filtered.length - 1 && s.rowBorder]}>
-                <View style={[s.txIcon, { backgroundColor: `${t.iconColor}15` }]}>
-                  <Ionicons name={t.icon} size={20} color={t.iconColor} />
+              <View key={t.id} style={[s.row, i < items.length - 1 && s.rowBorder]}>
+                <View style={[s.txIcon, { backgroundColor: isIncome ? "rgba(74,222,128,0.15)" : "rgba(239,68,68,0.15)" }]}>
+                  <Ionicons name="swap-horizontal-outline" size={20} color={isIncome ? "#4ADE80" : "#EF4444"} />
                 </View>
                 <View style={s.txInfo}>
-                  <Text style={s.txLabel} numberOfLines={1}>{t.label}</Text>
-                  <Text style={s.txMeta}>{t.category} · {t.date}, {t.time}</Text>
+                  <Text style={s.txLabel} numberOfLines={1}>{label}</Text>
+                  <Text style={s.txMeta}>{t.tipoOperacion} · {date}, {time}</Text>
                 </View>
                 <Text style={[s.txAmount, { color: isIncome ? "#4ADE80" : "#EF4444" }]}>
-                  {isIncome ? "+" : "-"}${fmtArs(t.amount)}
+                  {isIncome ? "+" : "-"}${fmtArs(montoNum)}
                 </Text>
               </View>
             );
           })}
         </View>
+        )}
 
-        {filtered.length === 0 && (
+        {!loading && !error && items.length === 0 && (
           <View style={s.empty}>
             <Ionicons name="document-text-outline" size={44} color="rgba(255,255,255,0.12)" />
             <Text style={s.emptyText}>No hay transacciones para este filtro</Text>
@@ -176,6 +206,9 @@ const s = StyleSheet.create({
   txLabel: { color: "#fff", fontSize: 14, fontWeight: "600", marginBottom: 3 },
   txMeta: { color: DIM, fontSize: 12 },
   txAmount: { fontSize: 15, fontWeight: "700" },
+
+  loadingBox: { alignItems: "center", paddingTop: 60, gap: 12 },
+  loadingText: { color: DIM, fontSize: 14 },
 
   empty: { alignItems: "center", paddingTop: 60, gap: 12 },
   emptyText: { color: DIM, fontSize: 14 },

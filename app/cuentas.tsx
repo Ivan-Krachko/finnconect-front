@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useContext, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -9,6 +11,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../src/context/AutenticacionContext";
+import * as cuentasService from "../src/Services/cuentas.service";
 
 interface Account {
   id: string;
@@ -22,11 +26,33 @@ interface Account {
   color: string;
 }
 
-const ACCOUNTS: Account[] = [
-  { id: "1", name: "Cuenta Principal", type: "Caja de Ahorro", currency: "ARS", balance: 3596000, cbu: "0070999030004123456789", alias: "SOFIA.GARCIA.FC", icon: "🇦🇷", color: "#1FA774" },
-  { id: "2", name: "Cuenta Dólares", type: "Caja de Ahorro USD", currency: "USD", balance: 2450, cbu: "0070999030004987654321", alias: "SOFIA.USD.FC", icon: "🇺🇸", color: "#3B82F6" },
-  { id: "3", name: "Cuenta Euro", type: "Caja de Ahorro EUR", currency: "EUR", balance: 1500, cbu: "0070999030004111222333", alias: "SOFIA.EUR.FC", icon: "🇪🇺", color: "#8B5CF6" },
-];
+const CURRENCY_CONFIG: Record<string, { icon: string; color: string }> = {
+  ARS: { icon: "🇦🇷", color: "#1FA774" },
+  USD: { icon: "🇺🇸", color: "#3B82F6" },
+  EUR: { icon: "🇪🇺", color: "#8B5CF6" },
+  BRL: { icon: "🇧🇷", color: "#22C55E" },
+};
+
+function mapApiItemToAccount(item: {
+  id: number;
+  cvu: string;
+  alias: string;
+  moneda: string;
+  saldo: string;
+}): Account {
+  const cfg = CURRENCY_CONFIG[item.moneda] || { icon: "💳", color: "#64748B" };
+  return {
+    id: String(item.id),
+    name: `Cuenta ${item.moneda}`,
+    type: "Caja de Ahorro",
+    currency: item.moneda,
+    balance: parseFloat(item.saldo) || 0,
+    cbu: item.cvu,
+    alias: item.alias,
+    icon: cfg.icon,
+    color: cfg.color,
+  };
+}
 
 const RECENT_ACTIVITY = [
   { id: "a1", desc: "Depósito recibido", account: "Cuenta Principal", amount: 350000, date: "Hoy, 10:23", type: "in" as const },
@@ -43,13 +69,51 @@ function fmtMoney(n: number, currency: string) {
 export default function CuentasScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { token } = useContext(autenticacionContext);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const totalArs = ACCOUNTS.reduce((sum, a) => {
-    if (a.currency === "ARS") return sum + a.balance;
-    if (a.currency === "USD") return sum + a.balance * 1024;
-    if (a.currency === "EUR") return sum + a.balance * 1593;
-    return sum;
-  }, 0);
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      setError("Debés iniciar sesión");
+      return;
+    }
+    cuentasService
+      .getCuentas(token)
+      .then((data) => {
+        setAccounts((data.items || []).map(mapApiItemToAccount));
+        setError(null);
+      })
+      .catch((e) => setError(e.message || "Error al cargar cuentas"))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  const saldoPrincipal = accounts
+    .filter((a) => a.currency === "ARS")
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  if (loading) {
+    return (
+      <View style={[s.container, { paddingTop: insets.top, flex: 1, justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color="#1FA774" />
+        <Text style={{ color: "#fff", marginTop: 12 }}>Cargando cuentas...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[s.container, { paddingTop: insets.top, flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }]}>
+        <Ionicons name="alert-circle" size={48} color="#EF4444" />
+        <Text style={{ color: "#fff", marginTop: 16, textAlign: "center" }}>{error}</Text>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 20, padding: 12 }}>
+          <Text style={{ color: "#1FA774", fontWeight: "600" }}>Volver</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -64,13 +128,13 @@ export default function CuentasScreen() {
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         {/* Total */}
         <View style={s.totalCard}>
-          <Text style={s.totalLabel}>Patrimonio Total (en ARS)</Text>
-          <Text style={s.totalValue}>${new Intl.NumberFormat("es-AR").format(Math.round(totalArs))}</Text>
-          <Text style={s.totalSub}>{ACCOUNTS.length} cuentas activas</Text>
+          <Text style={s.totalLabel}>Saldo Principal (ARS)</Text>
+          <Text style={s.totalValue}>${new Intl.NumberFormat("es-AR").format(Math.round(saldoPrincipal))}</Text>
+          <Text style={s.totalSub}>{accounts.length} cuentas activas</Text>
         </View>
 
         {/* Account cards */}
-        {ACCOUNTS.map((acc) => (
+        {accounts.map((acc) => (
           <View key={acc.id} style={s.accCard}>
             <View style={s.accTop}>
               <View style={s.accLeft}>

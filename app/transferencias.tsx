@@ -15,6 +15,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
+import { parseAmount } from "../src/utils/parseAmount";
+
+function normalizeAmountInput(t: string): string {
+  const lastPeriod = t.lastIndexOf(".");
+  if (lastPeriod < 0) return t;
+  const after = t.slice(lastPeriod + 1);
+  if (after.length === 3 && /^\d{3}$/.test(after)) return t;
+  return t.replace(/\./g, ",");
+}
 
 interface CuentaDestino {
   id: number;
@@ -94,7 +103,7 @@ export default function TransferenciasScreen() {
         token,
         cuentaOrigen.id,
         cuentaDestino!.id,
-        amount.trim(),
+        String(parseAmount(amount)),
       );
       router.back();
     } catch (e: any) {
@@ -223,7 +232,7 @@ export default function TransferenciasScreen() {
 
         {/* Paso 3: Monto */}
         {step === 3 && cuentaDestino && (
-          <View style={s.card}>
+            <View style={s.card}>
             <Text style={s.cardTitle}>¿Cuánto transferís?</Text>
             <Text style={s.cardSubtitle}>
               A {[cuentaDestino.usuarioNombre, cuentaDestino.usuarioApellido].filter(Boolean).join(" ")} ({cuentaDestino.alias})
@@ -232,10 +241,10 @@ export default function TransferenciasScreen() {
               <Text style={s.currency}>{cuentaDestino.moneda}</Text>
               <TextInput
                 style={s.amountInput}
-                placeholder="0.00"
+                placeholder="0"
                 placeholderTextColor="rgba(255,255,255,0.2)"
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(t) => setAmount(normalizeAmountInput(t))}
                 keyboardType="numeric"
               />
             </View>
@@ -282,7 +291,7 @@ export default function TransferenciasScreen() {
               <Text style={s.confirmLabel}>Monto</Text>
               <Text style={s.confirmValue}>
                 {cuentaDestino.moneda === "ARS" ? "$" : cuentaDestino.moneda + " "}
-                {new Intl.NumberFormat("es-AR").format(parseFloat(amount) || 0)}
+                {new Intl.NumberFormat("es-AR").format(parseAmount(amount))}
               </Text>
             </View>
             <View style={s.deductBanner}>

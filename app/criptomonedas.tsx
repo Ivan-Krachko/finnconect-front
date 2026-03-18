@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useCallback, useContext, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -8,37 +10,105 @@ import {
   Text,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../src/context/AutenticacionContext";
+import * as criptomonedasService from "../src/Services/criptomonedas.service";
+import { CRYPTO_DISPLAY, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
 
-interface Crypto {
+interface CryptoPrice {
+  tipo: string;
+  symbol: string;
+  name: string;
+  price: number;
+  percentChange24h: number | null;
+  lastUpdated: string;
+}
+
+interface CryptoDisplay {
   code: string;
   name: string;
   symbol: string;
   color: string;
-  priceArs: number;
+  price: number;
   holdings: number;
-  trend24h: number;
-  trend7d: number;
+  trend24h: number | null;
 }
 
-const CRYPTOS: Crypto[] = [
-  { code: "BTC", name: "Bitcoin", symbol: "₿", color: "#F7931A", priceArs: 98500000, holdings: 0.05, trend24h: 2.34, trend7d: 5.12 },
-  { code: "ETH", name: "Ethereum", symbol: "Ξ", color: "#627EEA", priceArs: 3200000, holdings: 1.2, trend24h: 1.87, trend7d: -0.45 },
-  { code: "SOL", name: "Solana", symbol: "◎", color: "#9945FF", priceArs: 185000, holdings: 15, trend24h: -0.92, trend7d: 8.3 },
-  { code: "ADA", name: "Cardano", symbol: "₳", color: "#0033AD", priceArs: 780, holdings: 5000, trend24h: 0.45, trend7d: -2.1 },
-  { code: "DOT", name: "Polkadot", symbol: "●", color: "#E6007A", priceArs: 8500, holdings: 120, trend24h: -1.23, trend7d: 3.7 },
-  { code: "AVAX", name: "Avalanche", symbol: "▲", color: "#E84142", priceArs: 42000, holdings: 25, trend24h: 3.12, trend7d: 12.5 },
-];
+/** Holdings mock hasta que exista endpoint de tenencias */
+const MOCK_HOLDINGS: Record<string, number> = {
+  BTC: 0.05,
+  ETH: 1.2,
+  SOL: 15,
+  ADA: 5000,
+  DOT: 120,
+  AVAX: 25,
+  USDT: 100,
+  BNB: 2,
+  XRP: 500,
+  DOGE: 1000,
+};
 
-function fmtArs(n: number) {
-  return new Intl.NumberFormat("es-AR").format(n);
+function fmtNumber(n: number, currency: string) {
+  if (currency === "ars" || currency === "jpy" || currency === "brl") {
+    return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n);
+  }
+  return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
 export default function CriptomonedasScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { token } = useContext(autenticacionContext);
+  const [cryptos, setCryptos] = useState<CryptoDisplay[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [convert, setConvert] = useState("ars");
 
-  const totalValue = CRYPTOS.reduce((sum, c) => sum + c.priceArs * c.holdings, 0);
+  const fetchPrecios = useCallback(() => {
+    if (!token) {
+      setLoading(false);
+      setError("Debes iniciar sesión para ver los precios");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    criptomonedasService
+      .getPreciosCriptomonedas(token, convert)
+      .then((data: CryptoPrice[]) => {
+        const mapped: CryptoDisplay[] = data.map((c) => {
+          const display = CRYPTO_DISPLAY[c.symbol as keyof typeof CRYPTO_DISPLAY] ?? {
+            symbol: c.symbol.charAt(0),
+            color: "#888",
+          };
+          return {
+            code: c.symbol,
+            name: c.name,
+            symbol: display.symbol,
+            color: display.color,
+            price: c.price,
+            holdings: MOCK_HOLDINGS[c.symbol] ?? 0,
+            trend24h: c.percentChange24h,
+          };
+        });
+        setCryptos(mapped);
+      })
+      .catch((err) => setError(err?.message || "Error al cargar precios"))
+      .finally(() => setLoading(false));
+  }, [token, convert]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchPrecios();
+    }, [fetchPrecios])
+  );
+
+  const totalValue = cryptos.reduce((sum, c) => sum + c.price * c.holdings, 0);
+  const withTrend = cryptos.filter((c) => c.trend24h !== null);
+  const avgTrend24h =
+    withTrend.length > 0 ? withTrend.reduce((s, c) => s + (c.trend24h ?? 0), 0) / withTrend.length : 0;
+
+  const currencyLabel = CONVERT_OPTIONS.find((o) => o.code === convert)?.label ?? convert.toUpperCase();
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -51,77 +121,133 @@ export default function CriptomonedasScreen() {
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-        {/* Summary */}
-        <View style={s.summaryCard}>
-          <Text style={s.summaryLabel}>Valor Total en Cripto</Text>
-          <Text style={s.summaryValue}>${fmtArs(Math.round(totalValue))}</Text>
-          <View style={s.summaryChips}>
-            <View style={s.chipGreen}>
-              <Ionicons name="trending-up" size={13} color="#4ADE80" />
-              <Text style={s.chipGreenText}>24h +2.1%</Text>
-            </View>
-            <View style={s.chipBlue}>
-              <Ionicons name="analytics" size={13} color="#60A5FA" />
-              <Text style={s.chipBlueText}>7d +4.8%</Text>
-            </View>
+        {/* Convert selector */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={s.convertScroll}
+          contentContainerStyle={s.convertRow}
+        >
+          {CONVERT_OPTIONS.map((opt) => (
+            <Pressable
+              key={opt.code}
+              style={[s.convertChip, convert === opt.code && s.convertChipActive]}
+              onPress={() => setConvert(opt.code)}
+            >
+              <Text style={[s.convertChipText, convert === opt.code && s.convertChipTextActive]}>
+                {opt.label}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        {loading ? (
+          <View style={s.loadingBox}>
+            <ActivityIndicator size="large" color="#1FA774" />
+            <Text style={s.loadingText}>Cargando precios...</Text>
           </View>
-        </View>
-
-        {/* List */}
-        <Text style={s.sectionHeading}>Mis Criptomonedas</Text>
-        <View style={s.listCard}>
-          {CRYPTOS.map((c, i) => {
-            const value = c.priceArs * c.holdings;
-            const up24 = c.trend24h >= 0;
-            return (
-              <View key={c.code} style={[s.row, i < CRYPTOS.length - 1 && s.rowBorder]}>
-                <View style={[s.icon, { backgroundColor: `${c.color}18` }]}>
-                  <Text style={[s.iconSymbol, { color: c.color }]}>{c.symbol}</Text>
-                </View>
-                <View style={s.info}>
-                  <Text style={s.coinName}>{c.name}</Text>
-                  <Text style={s.coinSub}>{c.holdings} {c.code}</Text>
-                </View>
-                <View style={s.right}>
-                  <Text style={s.coinValue}>${fmtArs(Math.round(value))}</Text>
-                  <View style={s.trendRow}>
-                    <Ionicons name={up24 ? "caret-up" : "caret-down"} size={12} color={up24 ? "#4ADE80" : "#EF4444"} />
-                    <Text style={[s.trendText, { color: up24 ? "#4ADE80" : "#EF4444" }]}>
-                      {up24 ? "+" : ""}{c.trend24h.toFixed(2)}%
-                    </Text>
-                  </View>
+        ) : error ? (
+          <View style={s.errorBox}>
+            <Ionicons name="alert-circle-outline" size={40} color="#EF4444" />
+            <Text style={s.errorText}>{error}</Text>
+            <Pressable style={s.retryBtn} onPress={fetchPrecios}>
+              <Text style={s.retryBtnText}>Reintentar</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            {/* Summary */}
+            <View style={s.summaryCard}>
+              <Text style={s.summaryLabel}>Valor Total en Cripto</Text>
+              <Text style={s.summaryValue}>
+                {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(totalValue, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+              </Text>
+              <View style={s.summaryChips}>
+                <View style={s.chipGreen}>
+                  <Ionicons name="trending-up" size={13} color="#4ADE80" />
+                  <Text style={s.chipGreenText}>
+                    24h {avgTrend24h >= 0 ? "+" : ""}{avgTrend24h.toFixed(2)}%
+                  </Text>
                 </View>
               </View>
-            );
-          })}
-        </View>
+            </View>
 
-        {/* Market */}
-        <Text style={s.sectionHeading}>Precios del Mercado</Text>
-        <View style={s.listCard}>
-          {CRYPTOS.map((c, i) => {
-            const up7 = c.trend7d >= 0;
-            return (
-              <View key={c.code} style={[s.row, i < CRYPTOS.length - 1 && s.rowBorder]}>
-                <View style={[s.icon, { backgroundColor: `${c.color}18` }]}>
-                  <Text style={[s.iconSymbol, { color: c.color }]}>{c.symbol}</Text>
-                </View>
-                <View style={s.info}>
-                  <Text style={s.coinName}>{c.code}</Text>
-                  <Text style={s.coinSub}>{c.name}</Text>
-                </View>
-                <View style={s.right}>
-                  <Text style={s.coinValue}>${fmtArs(c.priceArs)}</Text>
-                  <View style={s.trendRow}>
-                    <Text style={[s.trendText, { color: up7 ? "#4ADE80" : "#EF4444" }]}>
-                      7d {up7 ? "+" : ""}{c.trend7d.toFixed(1)}%
-                    </Text>
+            {/* List */}
+            <Text style={s.sectionHeading}>Mis Criptomonedas</Text>
+            <View style={s.listCard}>
+              {cryptos.filter((c) => c.holdings > 0).map((c, i, arr) => {
+                const value = c.price * c.holdings;
+                const up24 = c.trend24h !== null && c.trend24h >= 0;
+                return (
+                  <View key={c.code} style={[s.row, i < arr.length - 1 && s.rowBorder]}>
+                    <View style={[s.icon, { backgroundColor: `${c.color}18` }]}>
+                      <Text style={[s.iconSymbol, { color: c.color }]}>{c.symbol}</Text>
+                    </View>
+                    <View style={s.info}>
+                      <Text style={s.coinName}>{c.name}</Text>
+                      <Text style={s.coinSub}>{c.holdings} {c.code}</Text>
+                    </View>
+                    <View style={s.right}>
+                      <Text style={s.coinValue}>
+                        {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(value, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+                      </Text>
+                      <View style={s.trendRow}>
+                        {c.trend24h !== null ? (
+                          <>
+                            <Ionicons name={up24 ? "caret-up" : "caret-down"} size={12} color={up24 ? "#4ADE80" : "#EF4444"} />
+                            <Text style={[s.trendText, { color: up24 ? "#4ADE80" : "#EF4444" }]}>
+                              {up24 ? "+" : ""}{c.trend24h.toFixed(2)}%
+                            </Text>
+                          </>
+                        ) : (
+                          <Text style={s.trendText}>—</Text>
+                        )}
+                      </View>
+                    </View>
                   </View>
+                );
+              })}
+              {cryptos.filter((c) => c.holdings > 0).length === 0 && (
+                <View style={s.emptyRow}>
+                  <Text style={s.emptyText}>No tenés criptomonedas en tu portafolio</Text>
                 </View>
-              </View>
-            );
-          })}
-        </View>
+              )}
+            </View>
+
+            {/* Market */}
+            <Text style={s.sectionHeading}>Precios del Mercado</Text>
+            <View style={s.listCard}>
+              {cryptos.map((c, i) => {
+                const up = c.trend24h !== null && c.trend24h >= 0;
+                return (
+                  <View key={c.code} style={[s.row, i < cryptos.length - 1 && s.rowBorder]}>
+                    <View style={[s.icon, { backgroundColor: `${c.color}18` }]}>
+                      <Text style={[s.iconSymbol, { color: c.color }]}>{c.symbol}</Text>
+                    </View>
+                    <View style={s.info}>
+                      <Text style={s.coinName}>{c.code}</Text>
+                      <Text style={s.coinSub}>{c.name}</Text>
+                    </View>
+                    <View style={s.right}>
+                      <Text style={s.coinValue}>
+                        {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(c.price, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+                      </Text>
+                      <View style={s.trendRow}>
+                        {c.trend24h !== null ? (
+                          <Text style={[s.trendText, { color: up ? "#4ADE80" : "#EF4444" }]}>
+                            24h {up ? "+" : ""}{c.trend24h.toFixed(1)}%
+                          </Text>
+                        ) : (
+                          <Text style={s.trendText}>—</Text>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -141,6 +267,38 @@ const s = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14 },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
+
+  convertScroll: { marginBottom: 16, marginHorizontal: -20 },
+  convertRow: { paddingHorizontal: 20, gap: 8 },
+  convertChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  convertChipActive: {
+    backgroundColor: "rgba(31,167,116,0.2)",
+    borderColor: "rgba(31,167,116,0.5)",
+  },
+  convertChipText: { color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: "600" },
+  convertChipTextActive: { color: "#fff" },
+
+  loadingBox: { paddingVertical: 48, alignItems: "center", gap: 12 },
+  loadingText: { color: DIM, fontSize: 14 },
+
+  errorBox: { paddingVertical: 48, alignItems: "center", gap: 12 },
+  errorText: { color: "#EF4444", fontSize: 14, textAlign: "center", paddingHorizontal: 20 },
+  retryBtn: {
+    backgroundColor: "rgba(31,167,116,0.2)",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  retryBtnText: { color: "#1FA774", fontSize: 14, fontWeight: "700" },
+
+  emptyRow: { padding: 24, alignItems: "center" },
+  emptyText: { color: DIM, fontSize: 14 },
 
   summaryCard: { backgroundColor: CARD_BG, borderRadius: 22, padding: 24, borderWidth: 1, borderColor: "rgba(31,167,116,0.2)", marginBottom: 24, ...shadow },
   summaryLabel: { color: DIM, fontSize: 14, marginBottom: 8 },

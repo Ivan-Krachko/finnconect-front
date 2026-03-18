@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -9,7 +10,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import * as criptomonedasService from "../../src/Services/criptomonedas.service";
+import { CRYPTO_DISPLAY } from "../../src/constants/criptomonedas";
+import { parseAmount } from "../../src/utils/parseAmount";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type TabKey = "divisas" | "cripto" | "acciones";
@@ -75,55 +81,10 @@ const CURRENCIES: Currency[] = [
   },
 ];
 
-const CRYPTOS: Crypto[] = [
-  {
-    code: "BTC",
-    name: "Bitcoin",
-    symbol: "₿",
-    color: "#F7931A",
-    priceArs: 98500000,
-    trend: 2.34,
-  },
-  {
-    code: "ETH",
-    name: "Ethereum",
-    symbol: "Ξ",
-    color: "#627EEA",
-    priceArs: 3200000,
-    trend: 1.87,
-  },
-  {
-    code: "SOL",
-    name: "Solana",
-    symbol: "◎",
-    color: "#9945FF",
-    priceArs: 185000,
-    trend: -0.92,
-  },
-  {
-    code: "ADA",
-    name: "Cardano",
-    symbol: "₳",
-    color: "#0033AD",
-    priceArs: 780,
-    trend: 0.45,
-  },
-  {
-    code: "DOT",
-    name: "Polkadot",
-    symbol: "●",
-    color: "#E6007A",
-    priceArs: 8500,
-    trend: -1.23,
-  },
-  {
-    code: "AVAX",
-    name: "Avalanche",
-    symbol: "▲",
-    color: "#E84142",
-    priceArs: 42000,
-    trend: 3.12,
-  },
+/** Fallback cuando no hay datos del API */
+const CRYPTOS_FALLBACK: Crypto[] = [
+  { code: "BTC", name: "Bitcoin", symbol: "₿", color: "#F7931A", priceArs: 0, trend: 0 },
+  { code: "ETH", name: "Ethereum", symbol: "Ξ", color: "#627EEA", priceArs: 0, trend: 0 },
 ];
 
 const STOCKS: Stock[] = [
@@ -189,38 +150,130 @@ function fmtArs(n: number): string {
   return new Intl.NumberFormat("es-AR").format(n);
 }
 
-function fmtCrypto(n: number): string {
-  if (n >= 1) return n.toFixed(4);
-  if (n >= 0.001) return n.toFixed(6);
-  return n.toFixed(8);
+/** Normaliza input: si el teclado envía punto como decimal, mostramos coma (formato Argentina) */
+function normalizeAmountInput(t: string): string {
+  const lastPeriod = t.lastIndexOf(".");
+  if (lastPeriod < 0) return t;
+  const after = t.slice(lastPeriod + 1);
+  if (after.length === 3 && /^\d{3}$/.test(after)) return t;
+  return t.replace(/\./g, ",");
 }
+
+/** Formato cripto con coma como decimal (consistente con formato Argentina en la pantalla) */
+function fmtCrypto(n: number): string {
+  let s: string;
+  if (n >= 1) s = n.toFixed(4);
+  else if (n >= 0.001) s = n.toFixed(6);
+  else s = n.toFixed(8);
+  return s.replace(".", ",");
+}
+
+
+
 
 /* ── Component ── */
 
 export default function OperacionesScreen() {
   const insets = useSafeAreaInsets();
+  const { token } = useContext(autenticacionContext);
   const [activeTab, setActiveTab] = useState<TabKey>("divisas");
 
+  // Cripto prices from API
+  const [cryptos, setCryptos] = useState<Crypto[]>(CRYPTOS_FALLBACK);
+  const [cryptosLoading, setCryptosLoading] = useState(true);
+  const [cryptosError, setCryptosError] = useState<string | null>(null);
+
+  // Moneda fiat (ARS, USD, EUR, etc.)
+  const [cryptoSendCurrency, setCryptoSendCurrency] = useState("ARS");
+  // Modo: comprar (fiat→crypto) o vender (crypto→fiat)
+  const [cryptoMode, setCryptoMode] = useState<"comprar" | "vender">("comprar");
+
+  const fetchCryptoPrecios = useCallback(() => {
+    if (!token) {
+      setCryptos(CRYPTOS_FALLBACK);
+      setCryptosLoading(false);
+      return;
+    }
+    setCryptosLoading(true);
+    setCryptosError(null);
+    const convert = cryptoSendCurrency.toLowerCase();
+    criptomonedasService
+      .getPreciosCriptomonedas(token, convert)
+      .then((data: { tipo: string; symbol: string; name: string; price: number; percentChange24h: number | null }[]) => {
+        const mapped: Crypto[] = data.map((c) => {
+          const display = CRYPTO_DISPLAY[c.symbol as keyof typeof CRYPTO_DISPLAY] ?? {
+            symbol: c.symbol.charAt(0),
+            color: "#888",
+          };
+          return {
+            code: c.symbol,
+            name: c.name,
+            symbol: display.symbol,
+            color: display.color,
+            priceArs: c.price,
+            trend: c.percentChange24h ?? 0,
+          };
+        });
+        setCryptos(mapped.length > 0 ? mapped : CRYPTOS_FALLBACK);
+      })
+      .catch((err) => {
+        setCryptosError(err?.message || "Error al cargar precios");
+        setCryptos(CRYPTOS_FALLBACK);
+      })
+      .finally(() => setCryptosLoading(false));
+  }, [token, cryptoSendCurrency]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchCryptoPrecios();
+    }, [fetchCryptoPrecios])
+  );
+
+  // Refetch precios al cambiar la moneda de pago
+  useEffect(() => {
+    if (activeTab === "cripto" && token) fetchCryptoPrecios();
+  }, [cryptoSendCurrency]);
+
   // Divisas state
-  const [fxAmount, setFxAmount] = useState("1,000.00");
+  const [fxAmount, setFxAmount] = useState("");
   const sendCurrency = CURRENCIES[0];
   const receiveCurrency = CURRENCIES[2];
-  const fxNumeric = parseFloat(fxAmount.replace(/,/g, "")) || 0;
+  const fxNumeric = parseAmount(fxAmount);
   const fxRate = 1 / receiveCurrency.rateToArs;
   const fxReceive = fxNumeric * fxRate;
 
   // Cripto state
-  const [cryptoAmount, setCryptoAmount] = useState("500,000");
+  const [cryptoAmount, setCryptoAmount] = useState("");
   const [selectedCrypto, setSelectedCrypto] = useState(0);
-  const activeCrypto = CRYPTOS[selectedCrypto];
-  const cryptoNumeric = parseFloat(cryptoAmount.replace(/,/g, "")) || 0;
-  const cryptoReceive = cryptoNumeric / activeCrypto.priceArs;
+  const activeCrypto = cryptos[Math.min(selectedCrypto, cryptos.length - 1)] ?? CRYPTOS_FALLBACK[0];
+
+  useEffect(() => {
+    if (selectedCrypto >= cryptos.length && cryptos.length > 0) {
+      setSelectedCrypto(0);
+    }
+  }, [cryptos.length, selectedCrypto]);
+
+  // Reset monto al cambiar moneda o modo
+  useEffect(() => {
+    setCryptoAmount("");
+  }, [cryptoSendCurrency, cryptoMode]);
+
+  const cryptoNumeric = parseAmount(cryptoAmount);
+  const price = activeCrypto.priceArs;
+  const cryptoReceive =
+    cryptoMode === "comprar"
+      ? price > 0
+        ? cryptoNumeric / price
+        : 0
+      : price > 0
+        ? cryptoNumeric * price
+        : 0;
 
   // Acciones state
-  const [stockAmount, setStockAmount] = useState("1,000,000");
+  const [stockAmount, setStockAmount] = useState("");
   const [selectedStock, setSelectedStock] = useState(0);
   const activeStock = STOCKS[selectedStock];
-  const stockNumeric = parseFloat(stockAmount.replace(/,/g, "")) || 0;
+  const stockNumeric = parseAmount(stockAmount);
   const stockShares = stockNumeric / activeStock.priceArs;
 
   return (
@@ -296,7 +349,7 @@ export default function OperacionesScreen() {
                     <TextInput
                       style={s.amountInput}
                       value={fxAmount}
-                      onChangeText={setFxAmount}
+                      onChangeText={(t) => setFxAmount(normalizeAmountInput(t))}
                       keyboardType="numeric"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                     />
@@ -320,7 +373,7 @@ export default function OperacionesScreen() {
                     </View>
                   </View>
                   <View style={s.amountBox}>
-                    <Text style={s.amountValue}>{fxReceive.toFixed(2)}</Text>
+                    <Text style={s.amountValue}>{fxReceive.toFixed(2).replace(".", ",")}</Text>
                     <Ionicons name="chevron-down" size={16} color={DIM} />
                   </View>
                 </View>
@@ -379,10 +432,54 @@ export default function OperacionesScreen() {
         {activeTab === "cripto" && (
           <>
             <View style={s.card}>
-              <Text style={s.cardTitle}>Comprar Criptomonedas</Text>
-              <Text style={s.cardSub}>
-                Invertí en las principales criptomonedas del mercado.
-              </Text>
+              <View style={s.cardTitleRow}>
+                <View>
+                  <Text style={s.cardTitle}>
+                    {cryptoMode === "comprar" ? "Comprar" : "Vender"} Criptomonedas
+                  </Text>
+                  <Text style={s.cardSub}>
+                    {cryptoMode === "comprar"
+                      ? "Invertí moneda y recibí cripto."
+                      : "Vendé cripto y recibí moneda."}
+                  </Text>
+                </View>
+                {cryptosLoading && (
+                  <ActivityIndicator size="small" color="#1FA774" />
+                )}
+              </View>
+              {cryptosError && (
+                <Text style={s.cryptoErrorText}>{cryptosError}</Text>
+              )}
+
+              {/* Toggle Comprar / Vender */}
+              <View style={s.modeToggleRow}>
+                <Pressable
+                  style={[s.modeToggleBtn, cryptoMode === "comprar" && s.modeToggleBtnActive]}
+                  onPress={() => setCryptoMode("comprar")}
+                >
+                  <Ionicons
+                    name="arrow-down-circle"
+                    size={18}
+                    color={cryptoMode === "comprar" ? "#fff" : "rgba(255,255,255,0.4)"}
+                  />
+                  <Text style={[s.modeToggleText, cryptoMode === "comprar" && s.modeToggleTextActive]}>
+                    Comprar cripto
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[s.modeToggleBtn, cryptoMode === "vender" && s.modeToggleBtnActive]}
+                  onPress={() => setCryptoMode("vender")}
+                >
+                  <Ionicons
+                    name="arrow-up-circle"
+                    size={18}
+                    color={cryptoMode === "vender" ? "#fff" : "rgba(255,255,255,0.4)"}
+                  />
+                  <Text style={[s.modeToggleText, cryptoMode === "vender" && s.modeToggleTextActive]}>
+                    Vender cripto
+                  </Text>
+                </Pressable>
+              </View>
 
               {/* Crypto selector chips */}
               <ScrollView
@@ -391,7 +488,7 @@ export default function OperacionesScreen() {
                 style={s.chipScroll}
                 contentContainerStyle={s.chipRow}
               >
-                {CRYPTOS.map((c, i) => (
+                {cryptos.map((c, i) => (
                   <Pressable
                     key={c.code}
                     style={[
@@ -423,27 +520,85 @@ export default function OperacionesScreen() {
                 ))}
               </ScrollView>
 
+              {/* Selector de moneda para pagar */}
+              <View style={s.section}>
+                <Text style={s.label}>Pagar con</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={s.currencyChipScroll}
+                  contentContainerStyle={s.currencyChipRow}
+                >
+                  {CURRENCIES.map((curr) => {
+                    const active = cryptoSendCurrency === curr.code;
+                    return (
+                      <Pressable
+                        key={curr.code}
+                        style={[s.currencyChip, active && s.currencyChipActive]}
+                        onPress={() => setCryptoSendCurrency(curr.code)}
+                      >
+                        <Text style={s.currencyChipFlag}>{curr.flag}</Text>
+                        <Text style={[s.currencyChipCode, active && s.currencyChipCodeActive]}>
+                          {curr.code}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
               <View style={s.section}>
                 <Text style={s.label}>Tú Invertís</Text>
                 <View style={s.row}>
-                  <View style={s.rowLeft}>
-                    <View style={[s.circle, { backgroundColor: "#15332A" }]}>
-                      <Text style={s.emoji}>🇦🇷</Text>
-                    </View>
-                    <View>
-                      <Text style={s.code}>ARS</Text>
-                      <Text style={s.sub}>Peso Argentino</Text>
-                    </View>
-                  </View>
-                  <View style={s.amountBox}>
-                    <TextInput
-                      style={s.amountInput}
-                      value={cryptoAmount}
-                      onChangeText={setCryptoAmount}
-                      keyboardType="numeric"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                    />
-                  </View>
+                  {cryptoMode === "comprar" ? (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: "#15332A" }]}>
+                          <Text style={s.emoji}>
+                            {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.flag ?? "🇦🇷"}
+                          </Text>
+                        </View>
+                        <View>
+                          <Text style={s.code}>{cryptoSendCurrency}</Text>
+                          <Text style={s.sub}>
+                            {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.name ?? "Peso Argentino"}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={s.amountBox}>
+                        <TextInput
+                          style={s.amountInput}
+                          value={cryptoAmount}
+                          onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: `${activeCrypto.color}20` }]}>
+                          <Text style={[s.symbolText, { color: activeCrypto.color }]}>
+                            {activeCrypto.symbol}
+                          </Text>
+                        </View>
+                        <View>
+                          <Text style={s.code}>{activeCrypto.code}</Text>
+                          <Text style={s.sub}>{activeCrypto.name}</Text>
+                        </View>
+                      </View>
+                      <View style={s.amountBox}>
+                        <TextInput
+                          style={s.amountInput}
+                          value={cryptoAmount}
+                          onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor="rgba(255,255,255,0.25)"
+                        />
+                      </View>
+                    </>
+                  )}
                 </View>
               </View>
 
@@ -452,30 +607,51 @@ export default function OperacionesScreen() {
               <View style={s.section}>
                 <Text style={s.label}>Tú Recibes</Text>
                 <View style={s.row}>
-                  <View style={s.rowLeft}>
-                    <View
-                      style={[
-                        s.circle,
-                        { backgroundColor: `${activeCrypto.color}20` },
-                      ]}
-                    >
-                      <Text style={[s.symbolText, { color: activeCrypto.color }]}>
-                        {activeCrypto.symbol}
+                  {cryptoMode === "comprar" ? (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: `${activeCrypto.color}20` }]}>
+                          <Text style={[s.symbolText, { color: activeCrypto.color }]}>
+                            {activeCrypto.symbol}
+                          </Text>
+                        </View>
+                        <View>
+                          <Text style={s.code}>{activeCrypto.code}</Text>
+                          <Text style={s.sub}>{activeCrypto.name}</Text>
+                        </View>
+                      </View>
+                      <Text style={s.amountValue}>{fmtCrypto(cryptoReceive)}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: "#15332A" }]}>
+                          <Text style={s.emoji}>
+                            {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.flag ?? "🇦🇷"}
+                          </Text>
+                        </View>
+                        <View>
+                          <Text style={s.code}>{cryptoSendCurrency}</Text>
+                          <Text style={s.sub}>
+                            {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.name ?? "Peso Argentino"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={s.amountValue}>
+                        {(cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL")
+                          ? fmtArs(Math.round(cryptoReceive))
+                          : cryptoReceive.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                        {cryptoSendCurrency}
                       </Text>
-                    </View>
-                    <View>
-                      <Text style={s.code}>{activeCrypto.code}</Text>
-                      <Text style={s.sub}>{activeCrypto.name}</Text>
-                    </View>
-                  </View>
-                  <Text style={s.amountValue}>{fmtCrypto(cryptoReceive)}</Text>
+                    </>
+                  )}
                 </View>
               </View>
 
               <Text style={s.rateText}>
                 Precio:{" "}
                 <Text style={s.rateHl}>
-                  1 {activeCrypto.code} = {fmtArs(activeCrypto.priceArs)} ARS
+                  1 {activeCrypto.code} = {(cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL") ? fmtArs(Math.round(price)) : price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cryptoSendCurrency}
                 </Text>
               </Text>
 
@@ -483,19 +659,16 @@ export default function OperacionesScreen() {
                 <Pressable
                   style={({ pressed }) => [s.btnGreen, pressed && s.pressed]}
                 >
-                  <Text style={s.btnTxt}>Comprar {activeCrypto.code}</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.btnRed, pressed && s.pressed]}
-                >
-                  <Text style={s.btnTxt}>Vender {activeCrypto.code}</Text>
+                  <Text style={s.btnTxt}>
+                    {cryptoMode === "comprar" ? "Comprar" : "Vender"} {activeCrypto.code}
+                  </Text>
                 </Pressable>
               </View>
             </View>
 
             <Text style={s.heading}>Criptomonedas Populares</Text>
             <View style={s.grid}>
-              {CRYPTOS.map((c) => {
+              {cryptos.map((c) => {
                 const up = c.trend >= 0;
                 return (
                   <View key={c.code} style={s.gridCard}>
@@ -515,7 +688,12 @@ export default function OperacionesScreen() {
                     <Text style={s.gridCode}>{c.code}</Text>
                     <Text style={s.gridName}>{c.name}</Text>
                     <View style={s.gridBottom}>
-                      <Text style={s.gridPrice}>{fmtArs(c.priceArs)} ARS</Text>
+                      <Text style={s.gridPrice}>
+                        {cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL"
+                          ? fmtArs(Math.round(c.priceArs))
+                          : c.priceArs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                        {cryptoSendCurrency}
+                      </Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
                   </View>
@@ -586,7 +764,7 @@ export default function OperacionesScreen() {
                     <TextInput
                       style={s.amountInput}
                       value={stockAmount}
-                      onChangeText={setStockAmount}
+                      onChangeText={(t) => setStockAmount(normalizeAmountInput(t))}
                       keyboardType="numeric"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                     />
@@ -804,12 +982,54 @@ const s = StyleSheet.create({
     borderColor: BORDER,
     ...shadow,
   },
-  cardTitle: { color: "#fff", fontSize: 20, fontWeight: "800", marginBottom: 4 },
-  cardSub: { color: "rgba(255,255,255,0.4)", fontSize: 14, marginBottom: 20 },
+  cardTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  cardTitle: { color: "#fff", fontSize: 20, fontWeight: "800" },
+  cardSub: { color: "rgba(255,255,255,0.4)", fontSize: 14, marginTop: 4, marginBottom: 4 },
+  cryptoErrorText: { color: "#EF4444", fontSize: 12, marginBottom: 12 },
+
+  modeToggleRow: { flexDirection: "row", gap: 10, marginBottom: 18 },
+  modeToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  modeToggleBtnActive: {
+    backgroundColor: "rgba(31,167,116,0.15)",
+    borderColor: "rgba(31,167,116,0.4)",
+  },
+  modeToggleText: { color: "rgba(255,255,255,0.5)", fontSize: 14, fontWeight: "600" },
+  modeToggleTextActive: { color: "#fff" },
 
   /* Chip selector (cripto & acciones) */
   chipScroll: { marginBottom: 18, marginHorizontal: -22 },
   chipRow: { paddingHorizontal: 22, gap: 8 },
+
+  /* Currency selector (pagar con) */
+  currencyChipScroll: { marginBottom: 14, marginHorizontal: -22 },
+  currencyChipRow: { paddingHorizontal: 22, gap: 8 },
+  currencyChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  currencyChipActive: {
+    backgroundColor: "rgba(31,167,116,0.15)",
+    borderColor: "rgba(31,167,116,0.4)",
+  },
+  currencyChipFlag: { fontSize: 18 },
+  currencyChipCode: { color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: "600" },
+  currencyChipCodeActive: { color: "#fff" },
   chip: {
     flexDirection: "row",
     alignItems: "center",

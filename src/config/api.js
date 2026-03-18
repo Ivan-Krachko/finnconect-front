@@ -4,4 +4,4 @@
  */
 export const API_HOST =
   process.env.EXPO_PUBLIC_API_HOST ||
-  "https://ae3a-2803-9800-98c0-7212-8d0e-2b7b-8684-6082.ngrok-free.app";
+  "https://03ae-2803-9800-98c0-7212-b5b4-4b75-6cb9-59c1.ngrok-free.app";

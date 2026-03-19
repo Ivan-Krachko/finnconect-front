@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import {
   Platform,
   Pressable,
@@ -31,9 +32,17 @@ interface QuickAction {
   label: string;
   color: string;
   bg: string;
+  route?: string;
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
+  {
+    icon: "qr-code-outline",
+    label: "Pagar con QR",
+    color: "#1FA774",
+    bg: "rgba(31,167,116,0.15)",
+    route: "/pagar-qr",
+  },
   {
     icon: "flash",
     label: "Pagar Servicio",
@@ -121,6 +130,7 @@ function fmtAmount(n: number): string {
 
 export default function PagosScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -163,6 +173,7 @@ export default function PagosScreen() {
                   s.actionBtn,
                   pressed && { opacity: 0.8 },
                 ]}
+                onPress={() => action.route && router.push(action.route as any)}
               >
                 <View style={[s.actionIcon, { backgroundColor: action.bg }]}>
                   <Ionicons name={action.icon} size={28} color={action.color} />

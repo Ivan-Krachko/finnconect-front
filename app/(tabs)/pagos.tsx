@@ -44,6 +44,13 @@ const QUICK_ACTIONS: QuickAction[] = [
     route: "/pagar-qr",
   },
   {
+    icon: "qr-code",
+    label: "Cobrar con QR",
+    color: "#1FA774",
+    bg: "rgba(31,167,116,0.15)",
+    route: "/cobrar-qr",
+  },
+  {
     icon: "flash",
     label: "Pagar Servicio",
     color: "#1FA774",
@@ -308,10 +315,11 @@ const s = StyleSheet.create({
   },
   actionsRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
   },
   actionBtn: {
-    flex: 1,
+    width: "48%",
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 18,

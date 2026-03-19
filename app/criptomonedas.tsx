@@ -13,6 +13,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { safeBack } from "../src/utils/navigation";
 import * as criptomonedasService from "../src/Services/criptomonedas.service";
 import { CRYPTO_DISPLAY, CRYPTO_API_TO_CODE, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
 
@@ -108,7 +109,7 @@ export default function CriptomonedasScreen() {
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <Text style={s.headerTitle}>Criptomonedas</Text>

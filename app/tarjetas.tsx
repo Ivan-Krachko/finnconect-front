@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { safeBack } from "../src/utils/navigation";
 import {
   Platform,
   Pressable,
@@ -46,7 +47,7 @@ export default function TarjetasScreen() {
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <Text style={s.headerTitle}>Tarjetas</Text>

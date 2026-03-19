@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { safeBack } from "../src/utils/navigation";
 import * as movimientosService from "../src/Services/movimientos.service";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -80,7 +81,7 @@ export default function TransaccionesScreen() {
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <Text style={s.headerTitle}>Transacciones</Text>

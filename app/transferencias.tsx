@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
 import { parseAmount } from "../src/utils/parseAmount";
@@ -105,7 +106,7 @@ export default function TransferenciasScreen() {
         cuentaDestino!.id,
         String(parseAmount(amount)),
       );
-      router.back();
+      safeBack(router, "/(tabs)/home");
     } catch (e: any) {
       setError(e.message || "Error al transferir");
     } finally {
@@ -114,7 +115,7 @@ export default function TransferenciasScreen() {
   };
 
   const goBack = () => {
-    if (step === 1) router.back();
+    if (step === 1) safeBack(router, "/(tabs)/home");
     else setStep((s) => s - 1);
   };
 

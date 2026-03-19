@@ -117,7 +117,14 @@ export const crearTransaccionCripto = async (
   }
 
   if (!response.ok) {
-    throw new Error(data.message || "Error al crear transacción de cripto");
+    const msg =
+      data?.message ||
+      data?.error ||
+      (Array.isArray(data?.errors) && data.errors.length > 0
+        ? data.errors.map((e) => e.msg || e.message || e).join(". ")
+        : null) ||
+      "Error al crear transacción de cripto";
+    throw new Error(msg);
   }
 
   return data;

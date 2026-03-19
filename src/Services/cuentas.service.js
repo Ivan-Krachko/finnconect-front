@@ -40,6 +40,7 @@ export const searchCuenta = async (token, search) => {
       },
     }
   );
+  console.log("searchCuenta", response.status);
 
   const text = await response.text();
   let data;

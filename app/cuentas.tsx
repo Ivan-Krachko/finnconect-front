@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 
 interface Account {
@@ -108,7 +109,7 @@ export default function CuentasScreen() {
       <View style={[s.container, { paddingTop: insets.top, flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }]}>
         <Ionicons name="alert-circle" size={48} color="#EF4444" />
         <Text style={{ color: "#fff", marginTop: 16, textAlign: "center" }}>{error}</Text>
-        <Pressable onPress={() => router.back()} style={{ marginTop: 20, padding: 12 }}>
+        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} style={{ marginTop: 20, padding: 12 }}>
           <Text style={{ color: "#1FA774", fontWeight: "600" }}>Volver</Text>
         </Pressable>
       </View>
@@ -118,7 +119,7 @@ export default function CuentasScreen() {
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <Text style={s.headerTitle}>Mis Cuentas</Text>

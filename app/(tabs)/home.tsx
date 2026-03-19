@@ -30,36 +30,43 @@ const QUICK_ACTIONS: QuickAction[] = [
     icon: "swap-horizontal",
     label: "Transferir",
     route: "/transferencias",
-    bg: "#E8F8F0",
+    bg: "rgba(31,167,116,0.15)",
+  },
+  {
+    icon: "analytics-outline",
+    label: "Operaciones",
+    route: "/(tabs)/operaciones",
+    bg: "rgba(31,167,116,0.15)",
   },
   {
     icon: "receipt-outline",
     label: "Pagar",
     route: "/pagos",
-    bg: "#FFF4E6",
+    bg: "rgba(245,158,11,0.15)",
   },
   {
     icon: "logo-bitcoin",
     label: "Cripto",
     route: "/criptomonedas",
-    bg: "#F0EEFF",
+    bg: "rgba(124,58,237,0.15)",
   },
   {
     icon: "card-outline",
     label: "Tarjetas",
     route: "/tarjetas",
-    bg: "#E6F3FF",
+    bg: "rgba(59,130,246,0.15)",
   },
   {
     icon: "wallet-outline",
     label: "Cuentas",
     route: "/cuentas",
-    bg: "#FFF0F0",
+    bg: "rgba(239,68,68,0.15)",
   },
 ];
 
 const ACTION_ICON_COLORS: Record<string, string> = {
   "swap-horizontal": "#1FA774",
+  "analytics-outline": "#1FA774",
   "receipt-outline": "#F59E0B",
   "logo-bitcoin": "#7C3AED",
   "card-outline": "#3B82F6",
@@ -128,10 +135,10 @@ export default function Home() {
   return (
     <View style={s.container}>
       <LinearGradient
-        colors={["#072a1e", "#0e4430", "#17694a"]}
+        colors={["#080E0B", "#0B1612", "#0E1F18"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[StyleSheet.absoluteFill, { height: 380 }]}
+        style={StyleSheet.absoluteFill}
       />
 
       <ScrollView
@@ -146,7 +153,7 @@ export default function Home() {
         <View style={s.header}>
           <View style={s.headerLeft}>
             <View style={s.logoMini}>
-              <Ionicons name="wallet-outline" size={18} color="#0B3D2E" />
+              <Ionicons name="wallet-outline" size={18} color="#1FA774" />
             </View>
             <Text style={s.brandText}>FinConnect</Text>
           </View>
@@ -160,7 +167,7 @@ export default function Home() {
               <View style={s.badge} />
             </Pressable>
             <Pressable style={s.avatar}>
-              <Ionicons name="person" size={16} color="#0B3D2E" />
+              <Ionicons name="person" size={16} color="#1FA774" />
             </Pressable>
           </View>
         </View>
@@ -253,14 +260,14 @@ export default function Home() {
                     style={[
                       s.txIconCircle,
                       {
-                        backgroundColor: isIncome ? "#E8F8F0" : "#FEF0F0",
+                        backgroundColor: isIncome ? "rgba(31,167,116,0.15)" : "rgba(239,68,68,0.15)",
                       },
                     ]}
                   >
                     <Ionicons
                       name="swap-horizontal-outline"
                       size={20}
-                      color={isIncome ? "#1FA774" : "#E53935"}
+                      color={isIncome ? "#1FA774" : "#EF4444"}
                     />
                   </View>
                   <View style={s.txInfo}>
@@ -272,7 +279,7 @@ export default function Home() {
                   <Text
                     style={[
                       s.txAmount,
-                      { color: isIncome ? "#1FA774" : "#E53935" },
+                      { color: isIncome ? "#1FA774" : "#EF4444" },
                     ]}
                   >
                     {formatCurrency(tx.amount)}
@@ -287,19 +294,9 @@ export default function Home() {
   );
 }
 
-const SHADOW = Platform.select({
-  ios: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-  },
-  android: { elevation: 4 },
-  default: {},
-});
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F2F4F7" },
+  container: { flex: 1, backgroundColor: "#080E0B" },
   scroll: { flex: 1 },
 
   // ── Header ──
@@ -315,7 +312,7 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "rgba(31,167,116,0.25)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -336,13 +333,13 @@ const s = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: "#FF5252",
     borderWidth: 2,
-    borderColor: "#0e4430",
+    borderColor: "#080E0B",
   },
   avatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "rgba(31,167,116,0.25)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -411,29 +408,28 @@ const s = StyleSheet.create({
 
   // ── Content Sheet ──
   sheet: {
-    backgroundColor: "#F2F4F7",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: "transparent",
     marginTop: 24,
-    paddingTop: 28,
+    paddingTop: 0,
     paddingHorizontal: 20,
   },
 
   sectionTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#1A1A1A",
+    color: "#fff",
   },
 
   // ── Quick Actions ──
   actionsCard: {
-    backgroundColor: "#fff",
+    backgroundColor: "#111B16",
     borderRadius: 20,
     paddingTop: 20,
     paddingBottom: 4,
     marginTop: 14,
     marginBottom: 28,
-    ...SHADOW,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
   actionsGrid: {
     flexDirection: "row",
@@ -455,7 +451,7 @@ const s = StyleSheet.create({
   actionLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#555",
+    color: "rgba(255,255,255,0.8)",
     textAlign: "center",
   },
 
@@ -468,10 +464,11 @@ const s = StyleSheet.create({
   },
   seeAll: { color: "#1FA774", fontSize: 14, fontWeight: "600" },
   txCard: {
-    backgroundColor: "#fff",
+    backgroundColor: "#111B16",
     borderRadius: 20,
     overflow: "hidden",
-    ...SHADOW,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
   txRow: {
     flexDirection: "row",
@@ -482,7 +479,7 @@ const s = StyleSheet.create({
   },
   txRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F3F3",
+    borderBottomColor: "rgba(255,255,255,0.06)",
   },
   txIconCircle: {
     width: 44,
@@ -495,9 +492,9 @@ const s = StyleSheet.create({
   txName: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#1A1A1A",
+    color: "#fff",
     marginBottom: 3,
   },
-  txDate: { fontSize: 12, color: "#A0A0A0" },
+  txDate: { fontSize: 12, color: "rgba(255,255,255,0.4)" },
   txAmount: { fontSize: 15, fontWeight: "700" },
 });

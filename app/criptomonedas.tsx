@@ -112,7 +112,13 @@ export default function CriptomonedasScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <Text style={s.headerTitle}>Criptomonedas</Text>
-        <View style={{ width: 24 }} />
+        <Pressable
+          style={s.headerAction}
+          onPress={() => router.push("/(tabs)/operaciones" as any)}
+        >
+          <Ionicons name="swap-horizontal" size={20} color="#1FA774" />
+          <Text style={s.headerActionText}>Comprar / Vender</Text>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -261,6 +267,16 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#080E0B" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14 },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  headerAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(31,167,116,0.15)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  headerActionText: { color: "#1FA774", fontSize: 13, fontWeight: "700" },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
 
   convertScroll: { marginBottom: 16, marginHorizontal: -20 },

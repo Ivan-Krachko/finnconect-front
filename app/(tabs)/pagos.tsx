@@ -55,6 +55,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: "Pagar Servicio",
     color: "#1FA774",
     bg: "rgba(31,167,116,0.15)",
+    route: "/pagar-servicio",
   },
   {
     icon: "cube-outline",

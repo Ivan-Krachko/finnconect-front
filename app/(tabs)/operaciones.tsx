@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
 import * as criptomonedasService from "../../src/Services/criptomonedas.service";
 import * as cuentasService from "../../src/Services/cuentas.service";
+import * as currencyConversionsService from "../../src/Services/currency-conversions.service";
 import { CRYPTO_DISPLAY, CRYPTO_API_MAP } from "../../src/constants/criptomonedas";
 import { parseAmount } from "../../src/utils/parseAmount";
 
@@ -238,11 +239,82 @@ export default function OperacionesScreen() {
 
   // Divisas state
   const [fxAmount, setFxAmount] = useState("");
-  const sendCurrency = CURRENCIES[0];
-  const receiveCurrency = CURRENCIES[2];
+  const [fxSendCurrency, setFxSendCurrency] = useState("USD");
+  const [fxReceiveCurrency, setFxReceiveCurrency] = useState("EUR");
+  const [fxCuentas, setFxCuentas] = useState<{ id: number; moneda: string; alias: string; saldo: string }[]>([]);
+  const [fxRates, setFxRates] = useState<Record<string, number>>({});
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxSubmitting, setFxSubmitting] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
+
   const fxNumeric = parseAmount(fxAmount);
-  const fxRate = 1 / receiveCurrency.rateToArs;
-  const fxReceive = fxNumeric * fxRate;
+  const fxReceive = fxRates[fxReceiveCurrency] ?? 0;
+  const fxRate = fxNumeric > 0 ? fxReceive / fxNumeric : 0;
+  const cuentaOrigenFx = fxCuentas.find((c) => c.moneda === fxSendCurrency);
+  const cuentaDestinoFx = fxCuentas.find((c) => c.moneda === fxReceiveCurrency);
+  const saldoOrigen = cuentaOrigenFx ? parseFloat(cuentaOrigenFx.saldo) || 0 : 0;
+  const canConvertFx =
+    token &&
+    cuentaOrigenFx &&
+    cuentaDestinoFx &&
+    cuentaOrigenFx.id !== cuentaDestinoFx.id &&
+    fxNumeric > 0 &&
+    saldoOrigen >= fxNumeric;
+
+  useEffect(() => {
+    if (!token || activeTab !== "divisas") return;
+    cuentasService
+      .getCuentas(token)
+      .then((data) => {
+        const items = data.items ?? data.data ?? [];
+        setFxCuentas(items);
+        if (items.length >= 2) {
+          const moneda0 = items[0].moneda;
+          const moneda1 = items.find((c: { moneda: string }) => c.moneda !== moneda0)?.moneda ?? items[1]?.moneda;
+          setFxSendCurrency(moneda0);
+          setFxReceiveCurrency(moneda1 ?? moneda0);
+        } else if (items.length === 1) {
+          setFxSendCurrency(items[0].moneda);
+        }
+      })
+      .catch(() => setFxCuentas([]));
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "divisas" || !fxSendCurrency || fxNumeric <= 0) {
+      setFxRates({});
+      return;
+    }
+    setFxLoading(true);
+    currencyConversionsService
+      .getConvertRates(token, fxSendCurrency, fxNumeric)
+      .then((res) => setFxRates(res.rates ?? {}))
+      .catch(() => setFxRates({}))
+      .finally(() => setFxLoading(false));
+  }, [token, activeTab, fxSendCurrency, fxNumeric]);
+
+  const handleConvertirDivisas = async () => {
+    if (!token || !canConvertFx || !cuentaOrigenFx || !cuentaDestinoFx) return;
+    setFxError(null);
+    setFxSubmitting(true);
+    try {
+      const res = await currencyConversionsService.convertirMoneda(
+        token,
+        cuentaOrigenFx.id,
+        cuentaDestinoFx.id,
+        String(fxNumeric)
+      );
+      setFxAmount("");
+      Alert.alert(
+        "Conversión exitosa",
+        `Recibís ${typeof res.montoDestino === "number" ? res.montoDestino.toLocaleString("es-AR", { maximumFractionDigits: 2 }) : res.montoDestino} ${fxReceiveCurrency}`
+      );
+    } catch (e: any) {
+      setFxError(e?.message || "No se pudo completar la conversión");
+    } finally {
+      setFxSubmitting(false);
+    }
+  };
 
   // Cripto state
   const [cryptoAmount, setCryptoAmount] = useState("");
@@ -380,19 +452,57 @@ export default function OperacionesScreen() {
             <View style={s.card}>
               <Text style={s.cardTitle}>Intercambiar Divisas</Text>
               <Text style={s.cardSub}>
-                Convierte divisas en tiempo real.
+                Convertí entre tus cuentas en distintas monedas.
               </Text>
+
+              <View style={s.section}>
+                <Text style={s.label}>Desde cuenta</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={s.currencyChipScroll}
+                  contentContainerStyle={s.currencyChipRow}
+                >
+                  {fxCuentas.map((c) => {
+                    const active = fxSendCurrency === c.moneda;
+                    return (
+                      <Pressable
+                        key={c.id}
+                        style={[s.currencyChip, active && s.currencyChipActive]}
+                        onPress={() => {
+                          setFxSendCurrency(c.moneda);
+                          if (c.moneda === fxReceiveCurrency) {
+                            const otra = fxCuentas.find((x) => x.moneda !== c.moneda);
+                            if (otra) setFxReceiveCurrency(otra.moneda);
+                          }
+                        }}
+                      >
+                        <Text style={s.currencyChipFlag}>
+                          {CURRENCIES.find((x) => x.code === c.moneda)?.flag ?? "💱"}
+                        </Text>
+                        <Text style={[s.currencyChipCode, active && s.currencyChipCodeActive]}>
+                          {c.moneda}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
 
               <View style={s.section}>
                 <Text style={s.label}>Tú Envías</Text>
                 <View style={s.row}>
                   <View style={s.rowLeft}>
                     <View style={[s.circle, { backgroundColor: "#15332A" }]}>
-                      <Text style={s.emoji}>{sendCurrency.flag}</Text>
+                      <Text style={s.emoji}>
+                        {CURRENCIES.find((x) => x.code === fxSendCurrency)?.flag ?? "💱"}
+                      </Text>
                     </View>
                     <View>
-                      <Text style={s.code}>{sendCurrency.code}</Text>
-                      <Text style={s.sub}>Dólar{"\n"}Estadounidense</Text>
+                      <Text style={s.code}>{fxSendCurrency}</Text>
+                      <Text style={s.sub}>
+                        {CURRENCIES.find((x) => x.code === fxSendCurrency)?.name ?? fxSendCurrency}
+                      </Text>
                     </View>
                   </View>
                   <View style={s.amountBox}>
@@ -403,7 +513,6 @@ export default function OperacionesScreen() {
                       keyboardType="numeric"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                     />
-                    <Ionicons name="chevron-down" size={16} color={DIM} />
                   </View>
                 </View>
               </View>
@@ -411,39 +520,96 @@ export default function OperacionesScreen() {
               <View style={s.divider} />
 
               <View style={s.section}>
+                <Text style={s.label}>A cuenta</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={s.currencyChipScroll}
+                  contentContainerStyle={s.currencyChipRow}
+                >
+                  {fxCuentas
+                    .filter((c) => c.moneda !== fxSendCurrency)
+                    .map((c) => {
+                      const active = fxReceiveCurrency === c.moneda;
+                      return (
+                        <Pressable
+                          key={c.id}
+                          style={[s.currencyChip, active && s.currencyChipActive]}
+                          onPress={() => setFxReceiveCurrency(c.moneda)}
+                        >
+                          <Text style={s.currencyChipFlag}>
+                            {CURRENCIES.find((x) => x.code === c.moneda)?.flag ?? "💱"}
+                          </Text>
+                          <Text style={[s.currencyChipCode, active && s.currencyChipCodeActive]}>
+                            {c.moneda}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                </ScrollView>
+              </View>
+
+              <View style={s.section}>
                 <Text style={s.label}>Tú Recibes</Text>
                 <View style={s.row}>
                   <View style={s.rowLeft}>
                     <View style={[s.circle, { backgroundColor: "#152533" }]}>
-                      <Text style={s.emoji}>{receiveCurrency.flag}</Text>
+                      <Text style={s.emoji}>
+                        {CURRENCIES.find((x) => x.code === fxReceiveCurrency)?.flag ?? "💱"}
+                      </Text>
                     </View>
                     <View>
-                      <Text style={s.code}>{receiveCurrency.code}</Text>
-                      <Text style={s.sub}>{receiveCurrency.name}</Text>
+                      <Text style={s.code}>{fxReceiveCurrency}</Text>
+                      <Text style={s.sub}>
+                        {CURRENCIES.find((x) => x.code === fxReceiveCurrency)?.name ?? fxReceiveCurrency}
+                      </Text>
                     </View>
                   </View>
                   <View style={s.amountBox}>
-                    <Text style={s.amountValue}>{fxReceive.toFixed(2).replace(".", ",")}</Text>
-                    <Ionicons name="chevron-down" size={16} color={DIM} />
+                    {fxLoading ? (
+                      <ActivityIndicator size="small" color="#1FA774" />
+                    ) : (
+                      <Text style={s.amountValue}>
+                        {(fxReceiveCurrency === "ARS" || fxReceiveCurrency === "JPY" || fxReceiveCurrency === "BRL")
+                          ? fmtArs(Math.round(fxReceive))
+                          : fxReceive.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    )}
                   </View>
                 </View>
               </View>
 
-              <Text style={s.rateText}>
-                Tasa de cambio:{" "}
-                <Text style={s.rateHl}>1 ARS = {fxRate.toFixed(5)} EUR</Text>
-              </Text>
+              {fxNumeric > 0 && fxRate > 0 && (
+                <Text style={s.rateText}>
+                  Tasa:{" "}
+                  <Text style={s.rateHl}>
+                    1 {fxSendCurrency} = {(fxReceiveCurrency === "ARS" || fxReceiveCurrency === "JPY" || fxReceiveCurrency === "BRL") ? fmtArs(Math.round(fxRate)) : fxRate.toFixed(4)} {fxReceiveCurrency}
+                  </Text>
+                </Text>
+              )}
+
+              {fxError && (
+                <View style={s.fxErrorBox}>
+                  <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                  <Text style={s.fxErrorText}>{fxError}</Text>
+                </View>
+              )}
 
               <View style={s.btnRow}>
                 <Pressable
-                  style={({ pressed }) => [s.btnGreen, pressed && s.pressed]}
+                  style={({ pressed }) => [
+                    s.btnGreen,
+                    pressed && s.pressed,
+                    (!canConvertFx || fxSubmitting) && s.btnDisabled,
+                  ]}
+                  onPress={handleConvertirDivisas}
+                  disabled={!canConvertFx || fxSubmitting}
                 >
-                  <Text style={s.btnTxt}>Comprar EUR</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.btnRed, pressed && s.pressed]}
-                >
-                  <Text style={s.btnTxt}>Vender ARS</Text>
+                  {fxSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={s.btnTxt}>Convertir</Text>
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -1046,6 +1212,16 @@ const s = StyleSheet.create({
   cardTitle: { color: "#fff", fontSize: 20, fontWeight: "800" },
   cardSub: { color: "rgba(255,255,255,0.4)", fontSize: 14, marginTop: 4, marginBottom: 4 },
   cryptoErrorText: { color: "#EF4444", fontSize: 12, marginBottom: 12 },
+  fxErrorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  fxErrorText: { color: "#EF4444", fontSize: 14, fontWeight: "600", flex: 1 },
 
   modeToggleRow: { flexDirection: "row", gap: 10, marginBottom: 18 },
   modeToggleBtn: {

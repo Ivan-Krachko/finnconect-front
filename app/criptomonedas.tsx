@@ -14,7 +14,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import * as criptomonedasService from "../src/Services/criptomonedas.service";
-import { CRYPTO_DISPLAY, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
+import { CRYPTO_DISPLAY, CRYPTO_API_TO_CODE, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
 
 interface CryptoPrice {
   tipo: string;
@@ -34,20 +34,6 @@ interface CryptoDisplay {
   holdings: number;
   trend24h: number | null;
 }
-
-/** Holdings mock hasta que exista endpoint de tenencias */
-const MOCK_HOLDINGS: Record<string, number> = {
-  BTC: 0.05,
-  ETH: 1.2,
-  SOL: 15,
-  ADA: 5000,
-  DOT: 120,
-  AVAX: 25,
-  USDT: 100,
-  BNB: 2,
-  XRP: 500,
-  DOGE: 1000,
-};
 
 function fmtNumber(n: number, currency: string) {
   if (currency === "ars" || currency === "jpy" || currency === "brl") {
@@ -73,10 +59,19 @@ export default function CriptomonedasScreen() {
     }
     setLoading(true);
     setError(null);
-    criptomonedasService
-      .getPreciosCriptomonedas(token, convert)
-      .then((data: CryptoPrice[]) => {
-        const mapped: CryptoDisplay[] = data.map((c) => {
+    Promise.all([
+      criptomonedasService.getPreciosCriptomonedas(token, convert),
+      criptomonedasService.getCriptomonedas(token),
+    ])
+      .then(([pricesData, holdingsData]) => {
+        const holdingsByCode: Record<string, number> = {};
+        for (const item of holdingsData.items) {
+          const code = CRYPTO_API_TO_CODE[item.tipoCriptomoneda as keyof typeof CRYPTO_API_TO_CODE];
+          if (code) {
+            holdingsByCode[code] = parseFloat(item.monto) || 0;
+          }
+        }
+        const mapped: CryptoDisplay[] = (pricesData as CryptoPrice[]).map((c) => {
           const display = CRYPTO_DISPLAY[c.symbol as keyof typeof CRYPTO_DISPLAY] ?? {
             symbol: c.symbol.charAt(0),
             color: "#888",
@@ -87,13 +82,13 @@ export default function CriptomonedasScreen() {
             symbol: display.symbol,
             color: display.color,
             price: c.price,
-            holdings: MOCK_HOLDINGS[c.symbol] ?? 0,
+            holdings: holdingsByCode[c.symbol] ?? 0,
             trend24h: c.percentChange24h,
           };
         });
         setCryptos(mapped);
       })
-      .catch((err) => setError(err?.message || "Error al cargar precios"))
+      .catch((err) => setError(err?.message || "Error al cargar datos"))
       .finally(() => setLoading(false));
   }, [token, convert]);
 
@@ -144,7 +139,7 @@ export default function CriptomonedasScreen() {
         {loading ? (
           <View style={s.loadingBox}>
             <ActivityIndicator size="large" color="#1FA774" />
-            <Text style={s.loadingText}>Cargando precios...</Text>
+            <Text style={s.loadingText}>Cargando...</Text>
           </View>
         ) : error ? (
           <View style={s.errorBox}>

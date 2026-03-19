@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useContext, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -14,7 +15,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
 import * as criptomonedasService from "../../src/Services/criptomonedas.service";
-import { CRYPTO_DISPLAY } from "../../src/constants/criptomonedas";
+import * as cuentasService from "../../src/Services/cuentas.service";
+import { CRYPTO_DISPLAY, CRYPTO_API_MAP } from "../../src/constants/criptomonedas";
 import { parseAmount } from "../../src/utils/parseAmount";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -245,7 +247,17 @@ export default function OperacionesScreen() {
   // Cripto state
   const [cryptoAmount, setCryptoAmount] = useState("");
   const [selectedCrypto, setSelectedCrypto] = useState(0);
+  const [cuentas, setCuentas] = useState<{ id: number; moneda: string; alias: string }[]>([]);
+  const [cryptoSubmitting, setCryptoSubmitting] = useState(false);
   const activeCrypto = cryptos[Math.min(selectedCrypto, cryptos.length - 1)] ?? CRYPTOS_FALLBACK[0];
+
+  useEffect(() => {
+    if (!token || activeTab !== "cripto") return;
+    cuentasService
+      .getCuentas(token)
+      .then((data) => setCuentas(data.items || []))
+      .catch(() => setCuentas([]));
+  }, [token, activeTab]);
 
   useEffect(() => {
     if (selectedCrypto >= cryptos.length && cryptos.length > 0) {
@@ -268,6 +280,44 @@ export default function OperacionesScreen() {
       : price > 0
         ? cryptoNumeric * price
         : 0;
+
+  const cuentaCrypto = cuentas.find((c) => c.moneda === cryptoSendCurrency) ?? cuentas[0];
+  const cantidadCripto = cryptoMode === "comprar" ? cryptoReceive : cryptoNumeric;
+  const canConfirmCrypto =
+    token &&
+    cuentaCrypto &&
+    cantidadCripto > 0 &&
+    (CRYPTO_API_MAP[activeCrypto.code as keyof typeof CRYPTO_API_MAP] ||
+      activeCrypto.code.toLowerCase());
+
+  const handleCryptoConfirm = async () => {
+    if (!token || !cuentaCrypto || !canConfirmCrypto || cryptoSubmitting) return;
+    const tipoCripto =
+      CRYPTO_API_MAP[activeCrypto.code as keyof typeof CRYPTO_API_MAP] ||
+      activeCrypto.code.toLowerCase();
+    const sentido = cryptoMode === "comprar" ? "egreso" : "ingreso";
+    setCryptoSubmitting(true);
+    try {
+      const cantidadStr =
+        cantidadCripto < 1e-6 ? cantidadCripto.toFixed(18) : String(cantidadCripto);
+      await criptomonedasService.crearTransaccionCripto(
+        token,
+        cuentaCrypto.id,
+        tipoCripto,
+        sentido,
+        cantidadStr
+      );
+      setCryptoAmount("");
+      Alert.alert(
+        "Operación exitosa",
+        `${cryptoMode === "comprar" ? "Compra" : "Venta"} de ${activeCrypto.code} realizada correctamente.`
+      );
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "No se pudo completar la operación");
+    } finally {
+      setCryptoSubmitting(false);
+    }
+  };
 
   // Acciones state
   const [stockAmount, setStockAmount] = useState("");
@@ -657,11 +707,21 @@ export default function OperacionesScreen() {
 
               <View style={s.btnRow}>
                 <Pressable
-                  style={({ pressed }) => [s.btnGreen, pressed && s.pressed]}
+                  style={({ pressed }) => [
+                    s.btnGreen,
+                    pressed && s.pressed,
+                    (!canConfirmCrypto || cryptoSubmitting) && s.btnDisabled,
+                  ]}
+                  onPress={handleCryptoConfirm}
+                  disabled={!canConfirmCrypto || cryptoSubmitting}
                 >
-                  <Text style={s.btnTxt}>
-                    {cryptoMode === "comprar" ? "Comprar" : "Vender"} {activeCrypto.code}
-                  </Text>
+                  {cryptoSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={s.btnTxt}>
+                      {cryptoMode === "comprar" ? "Comprar" : "Vender"} {activeCrypto.code}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -1112,6 +1172,7 @@ const s = StyleSheet.create({
     paddingVertical: 15,
     alignItems: "center",
   },
+  btnDisabled: { opacity: 0.5 },
   btnTxt: { color: "#fff", fontSize: 15, fontWeight: "700" },
   pressed: { opacity: 0.85 },
 

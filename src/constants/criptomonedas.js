@@ -15,6 +15,36 @@ export const CRYPTO_DISPLAY = {
   DOGE: { symbol: "Ð", color: "#C2A633" },
 };
 
+/** Mapeo código → tipoCriptomoneda para el API (lowercase) */
+export const CRYPTO_API_MAP = {
+  BTC: "bitcoin",
+  ETH: "ethereum",
+  USDT: "usdt",
+  SOL: "solana",
+  ADA: "cardano",
+  DOT: "polkadot",
+  AVAX: "avalanche",
+  BNB: "binancecoin",
+  XRP: "ripple",
+  DOGE: "dogecoin",
+};
+
+/** Mapeo tipoCriptomoneda (API) → código para display */
+export const CRYPTO_API_TO_CODE = {
+  bitcoin: "BTC",
+  ethereum: "ETH",
+  usdt: "USDT",
+  solana: "SOL",
+  cardano: "ADA",
+  polkadot: "DOT",
+  avalanche: "AVAX",
+  binancecoin: "BNB",
+  binance: "BNB",
+  ripple: "XRP",
+  xrp: "XRP",
+  dogecoin: "DOGE",
+};
+
 /** Monedas soportadas por el endpoint de precios (convert param) */
 export const CONVERT_OPTIONS = [
   { code: "ars", label: "ARS" },

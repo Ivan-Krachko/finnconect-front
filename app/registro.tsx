@@ -18,6 +18,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { FaceCameraMask } from "../src/components/FaceCameraMask";
+import { FACE_OVAL_H, FACE_OVAL_W, FACE_PRIMARY, FACE_UI_SURFACE } from "../src/components/faceScanConstants";
 import {
   detectFacesFromImageUri,
   ensureTfjsFaceDetectorReady,
@@ -204,8 +206,8 @@ export default function RegistroScreen() {
           rostro: "none",
           distancia: "pending",
           centro: "pending",
-          title: "Iniciando cámara…",
-          subtitle: "Un momento.",
+          title: "Encuadre",
+          subtitle: "Ubicá tu cara en el óvalo y tocá continuar.",
         });
         return;
       }
@@ -216,6 +218,7 @@ export default function RegistroScreen() {
           quality: 0.78,
           // false: respeta orientación EXIF; evita bounds de rostro descalados
           skipProcessing: false,
+          shutterSound: false,
         });
         uri = photo.uri;
         const detection = await detectFacesFromImageUri(uri);
@@ -225,8 +228,8 @@ export default function RegistroScreen() {
             rostro: "none",
             distancia: "pending",
             centro: "pending",
-            title: "Sin análisis",
-            subtitle: "Seguimos intentando conectar con el detector…",
+            title: "Encuadre",
+            subtitle: "Ubicá tu cara en el óvalo y tocá continuar.",
           });
           return;
         }
@@ -248,11 +251,10 @@ export default function RegistroScreen() {
         setFaceGuide({
           ...guide,
           title: "Listo",
-          subtitle: "Registrando…",
+          subtitle: "Tocá Continuar para finalizar.",
         });
         cancelled = true;
         if (intervalId) clearInterval(intervalId);
-        void completeRegistration();
       } catch (e: unknown) {
         if (uri) {
           await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
@@ -283,8 +285,8 @@ export default function RegistroScreen() {
           rostro: "none",
           distancia: "pending",
           centro: "pending",
-          title: "Cargando modelo de IA…",
-          subtitle: "TensorFlow.js + BlazeFace (la primera vez puede tardar un poco).",
+          title: "Encuadre",
+          subtitle: "Ubicá tu cara en el óvalo y tocá continuar.",
         });
         await ensureTfjsFaceDetectorReady();
         if (cancelled) return;
@@ -348,174 +350,92 @@ export default function RegistroScreen() {
 
     const ovalVisual = ovalVisualFromGuide(faceGuide, alignProgress);
 
+    const guidanceLine =
+      verifyMode === "fallback"
+        ? faceHint || "No hay detector facial en este entorno."
+        : facePhase === "preview" || verifyMode === "idle"
+          ? "Ubicá tu cara en el óvalo y tocá continuar"
+          : faceGuide
+            ? faceGuide.subtitle.trim() || faceGuide.title
+            : "Ubicá tu cara en el óvalo y tocá continuar";
+
+    const canTapContinue =
+      verifyMode === "fallback"
+        ? !registering
+        : Boolean(faceGuide?.ready && facePhase === "scanning" && !registering);
+
+    const topInsetPad = insets.top + (Platform.OS === "ios" ? 12 : 10);
+
     return (
       <View style={s.faceRoot}>
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing="front"
-          mirror
-          mode="picture"
-          onCameraReady={() => setCameraReady(true)}
-        />
-
-        {/* Oscurece bordes; el centro queda transparente para ver el rostro */}
-        <View style={[s.faceOverlay, { paddingTop: insets.top }]} pointerEvents="box-none">
-          <View style={s.overlayTop} />
-          <View style={s.overlayMid}>
-            <View style={s.overlaySide} />
-            <View style={s.ovalCutout}>
-              <View
-                style={[
-                  s.ovalBorder,
-                  ovalVisual === "neutral" && s.ovalBorderNeutral,
-                  ovalVisual === "warn" && s.ovalBorderWarn,
-                  ovalVisual === "bad" && s.ovalBorderBad,
-                  ovalVisual === "success" && s.ovalBorderSuccess,
-                ]}
-              />
-            </View>
-            <View style={s.overlaySide} />
-          </View>
-          <View style={[s.overlayBottom, { paddingBottom: 0 }]}>
-            <ScrollView
-              style={s.overlayBottomScroll}
-              contentContainerStyle={[
-                s.overlayBottomContent,
-                { paddingBottom: Math.max(insets.bottom, 12) + 8 },
-              ]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              bounces
-            >
-              <Pressable
-                onPress={handleBack}
-                style={s.backRowFace}
-                hitSlop={12}
-              >
-                <Ionicons name="chevron-back" size={28} color="#fff" />
-              </Pressable>
-
-              <Text style={s.faceTitle}>Validación de identidad</Text>
-              <Text style={s.faceHint}>
-                El óvalo cambia de color con el encuadre. Deslizá hacia abajo si no ves el panel.
-              </Text>
-
-              {(facePhase === "preview" || facePhase === "scanning") && (
-                <View style={s.scanningBox}>
-                {verifyMode === "fallback" ? (
-                  <>
-                    <Ionicons name="information-circle-outline" size={44} color="rgba(255,255,255,0.95)" />
-                    <Text style={s.scanningText}>Sin verificación facial</Text>
-                    <Text style={s.scanningSub}>
-                      No se pudo usar ni ML Kit ni TensorFlow.js; no validamos el óvalo.
+        <View style={s.faceChrome} pointerEvents="box-none">
+          {facePhase === "done" ? (
+            <>
+              <View style={[s.topBar, { paddingTop: topInsetPad }]}>
+                <View style={s.topBarRow}>
+                  <Pressable onPress={handleBack} style={s.topBarSide} hitSlop={14} disabled={registering}>
+                    <Ionicons name="chevron-back" size={24} color="#6B7280" />
+                  </Pressable>
+                  <Text style={s.topTitle}>
+                    {registering ? "Creando tu cuenta…" : "Rostro verificado."}
+                  </Text>
+                  <View style={s.topBarSide} />
+                </View>
+                {registering ? <ActivityIndicator color={FACE_PRIMARY} style={{ marginTop: 10 }} /> : null}
+              </View>
+              <View style={[s.fillLight, { paddingBottom: insets.bottom + 8 }]} />
+            </>
+          ) : (
+            <>
+              <View style={[s.topBar, { paddingTop: topInsetPad }]}>
+                <View style={s.topBarRow}>
+                  <Pressable onPress={handleBack} style={s.topBarSide} hitSlop={14}>
+                    <Ionicons name="chevron-back" size={24} color="#6B7280" />
+                  </Pressable>
+                  <Text style={s.topTitle}>{guidanceLine}</Text>
+                  <View style={s.topBarSide} />
+                </View>
+              </View>
+              <View style={s.maskArea}>
+                <FaceCameraMask
+                  ovalW={FACE_OVAL_W}
+                  ovalH={FACE_OVAL_H}
+                  camera={
+                    <CameraView
+                      ref={cameraRef}
+                      style={{ width: FACE_OVAL_W, height: FACE_OVAL_H }}
+                      facing="front"
+                      mirror
+                      mode="picture"
+                      onCameraReady={() => setCameraReady(true)}
+                    />
+                  }
+                  ovalBorder={
+                    <View
+                      style={[
+                        s.ovalBorder,
+                        ovalVisual === "neutral" && s.ovalBorderNeutral,
+                        ovalVisual === "warn" && s.ovalBorderWarn,
+                        ovalVisual === "bad" && s.ovalBorderBad,
+                        ovalVisual === "success" && s.ovalBorderSuccess,
+                      ]}
+                    />
+                  }
+                />
+              </View>
+              <View style={[s.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
+                  <Pressable
+                    style={[s.continueBtn, !canTapContinue && s.continueBtnDisabled]}
+                    disabled={!canTapContinue}
+                    onPress={() => void completeRegistration()}
+                  >
+                    <Text style={s.continueBtnText}>
+                      {verifyMode === "fallback" ? "Continuar (desarrollo)" : "Continuar"}
                     </Text>
-                    {faceHint ? <Text style={s.hintBanner}>{faceHint}</Text> : null}
-                    <Pressable
-                      style={s.fallbackBtn}
-                      onPress={() => void completeRegistration()}
-                      disabled={registering}
-                    >
-                      <Text style={s.fallbackBtnText}>Continuar registro (solo desarrollo)</Text>
-                    </Pressable>
-                  </>
-                ) : facePhase === "preview" || verifyMode === "idle" ? (
-                  <>
-                    <ActivityIndicator color="#1FA774" size="large" />
-                    <Text style={s.scanningText}>Preparando verificación…</Text>
-                  </>
-                ) : (
-                  <View style={s.guideCard}>
-                    <View style={s.chipRow}>
-                      <View
-                        style={[
-                          s.chip,
-                          faceGuide?.rostro === "ok"
-                            ? s.chipOk
-                            : faceGuide?.rostro === "none"
-                              ? s.chipBad
-                              : faceGuide?.rostro === "multiple"
-                                ? s.chipWarn
-                                : s.chipIdle,
-                        ]}
-                      >
-                        <Text style={s.chipText}>Rostro</Text>
-                      </View>
-                      <View
-                        style={[
-                          s.chip,
-                          faceGuide?.distancia === "ok"
-                            ? s.chipOk
-                            : faceGuide?.distancia === "too_far" || faceGuide?.distancia === "too_close"
-                              ? s.chipWarn
-                              : s.chipIdle,
-                        ]}
-                      >
-                        <Text style={s.chipText}>Distancia</Text>
-                      </View>
-                      <View
-                        style={[
-                          s.chip,
-                          faceGuide?.centro === "ok"
-                            ? s.chipOk
-                            : faceGuide?.centro === "off"
-                              ? s.chipWarn
-                              : s.chipIdle,
-                        ]}
-                      >
-                        <Text style={s.chipText}>Centro</Text>
-                      </View>
-                    </View>
-
-                    {faceGuide?.nudge && (faceGuide.nudge.h || faceGuide.nudge.v) ? (
-                      <View style={s.nudgeRow}>
-                        {faceGuide.nudge.h === "left" ? (
-                          <Ionicons name="arrow-back" size={36} color="#FFD60A" />
-                        ) : null}
-                        {faceGuide.nudge.h === "right" ? (
-                          <Ionicons name="arrow-forward" size={36} color="#FFD60A" />
-                        ) : null}
-                        {faceGuide.nudge.v === "up" ? (
-                          <Ionicons name="arrow-up" size={36} color="#FFD60A" />
-                        ) : null}
-                        {faceGuide.nudge.v === "down" ? (
-                          <Ionicons name="arrow-down" size={36} color="#FFD60A" />
-                        ) : null}
-                      </View>
-                    ) : null}
-
-                    {faceGuide ? (
-                      <>
-                        <Text style={s.guideTitle}>{faceGuide.title}</Text>
-                        <Text style={s.guideSubtitle}>{faceGuide.subtitle}</Text>
-                      </>
-                    ) : (
-                      <>
-                        <ActivityIndicator color="#1FA774" style={{ marginTop: 8 }} />
-                        <Text style={s.guideSubtitle}>Analizando imagen…</Text>
-                      </>
-                    )}
-                  </View>
-                )}
+                  </Pressable>
                 </View>
-              )}
-
-              {facePhase === "done" && (
-                <View style={s.scanningBox}>
-                  <Ionicons name="checkmark-circle" size={56} color="#1FA774" />
-                  <Text style={s.scanningText}>Rostro verificado</Text>
-                  {registering ? (
-                    <>
-                      <ActivityIndicator color="#fff" style={{ marginTop: 16 }} />
-                      <Text style={[s.scanningSub, { marginTop: 10 }]}>Creando tu cuenta…</Text>
-                    </>
-                  ) : (
-                    <Text style={s.scanningSub}>Preparando registro…</Text>
-                  )}
-                </View>
-              )}
-            </ScrollView>
-          </View>
+              </>
+            )}
         </View>
       </View>
     );
@@ -664,9 +584,6 @@ function Field({
   );
 }
 
-const OVAL_W = 280;
-const OVAL_H = 360;
-
 const s = StyleSheet.create({
   bg: { flex: 1 },
   flex: { flex: 1 },
@@ -760,40 +677,60 @@ const s = StyleSheet.create({
   buttonPressed: { opacity: 0.92 },
   buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
-  faceRoot: { flex: 1, backgroundColor: "#000" },
-  faceOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "flex-end" },
-  overlayTop: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: "rgba(0,0,0,0.55)",
+  faceRoot: { flex: 1, backgroundColor: FACE_UI_SURFACE },
+  faceChrome: { flex: 1 },
+  topBar: {
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+    backgroundColor: FACE_UI_SURFACE,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,0,0,0.08)",
   },
-  overlayMid: {
+  topBarRow: {
     flexDirection: "row",
-    height: OVAL_H,
-  },
-  overlaySide: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-  },
-  ovalCutout: {
-    width: OVAL_W,
-    height: OVAL_H,
-    justifyContent: "center",
     alignItems: "center",
+    minHeight: 44,
   },
+  topBarSide: { width: 44, alignItems: "flex-start", justifyContent: "center" },
+  topTitle: {
+    flex: 1,
+    textAlign: "center",
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 21,
+  },
+  maskArea: { flex: 1, minHeight: 0 },
+  bottomBar: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    backgroundColor: FACE_UI_SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0,0,0,0.06)",
+  },
+  continueBtn: {
+    backgroundColor: FACE_PRIMARY,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  continueBtnDisabled: { opacity: 0.45 },
+  continueBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  fillLight: { flex: 1, backgroundColor: FACE_UI_SURFACE },
   ovalBorder: {
-    width: OVAL_W - 8,
-    height: OVAL_H - 8,
-    borderRadius: (OVAL_W - 8) / 2,
-    borderWidth: 3,
+    width: FACE_OVAL_W - 8,
+    height: FACE_OVAL_H - 8,
+    borderRadius: (FACE_OVAL_W - 8) / 2,
+    borderWidth: 2,
     backgroundColor: "transparent",
   },
   ovalBorderNeutral: {
-    borderColor: "rgba(31, 167, 116, 0.95)",
-    shadowColor: "#1FA774",
+    borderColor: FACE_PRIMARY,
+    shadowColor: FACE_PRIMARY,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
   },
   ovalBorderWarn: {
     borderColor: "rgba(255, 214, 10, 0.98)",
@@ -803,10 +740,10 @@ const s = StyleSheet.create({
     shadowRadius: 12,
   },
   ovalBorderBad: {
-    borderColor: "rgba(255, 100, 100, 0.98)",
-    shadowColor: "#FF6B6B",
+    borderColor: "rgba(255, 214, 10, 0.95)",
+    shadowColor: "#FFD60A",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.45,
     shadowRadius: 10,
   },
   ovalBorderSuccess: {
@@ -816,144 +753,6 @@ const s = StyleSheet.create({
     shadowOpacity: 0.65,
     shadowRadius: 12,
   },
-  overlayBottom: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: "rgba(0,0,0,0.55)",
-  },
-  overlayBottomScroll: {
-    flex: 1,
-    width: "100%",
-  },
-  overlayBottomContent: {
-    paddingHorizontal: 16,
-    alignItems: "center",
-  },
-  backRowFace: {
-    alignSelf: "flex-start",
-    paddingVertical: 4,
-    marginBottom: 4,
-  },
-  faceTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  faceHint: {
-    color: "rgba(255,255,255,0.82)",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 8,
-    lineHeight: 18,
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
-  scanningBox: { alignItems: "center", marginTop: 8, width: "100%" },
-  guideCard: {
-    width: "100%",
-    maxWidth: 360,
-    backgroundColor: "rgba(0,0,0,0.78)",
-    borderRadius: 18,
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 8,
-    marginBottom: 10,
-  },
-  chip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1.5,
-  },
-  chipText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#fff",
-    letterSpacing: 0.4,
-  },
-  chipOk: {
-    backgroundColor: "rgba(31, 167, 116, 0.35)",
-    borderColor: "#1FA774",
-  },
-  chipWarn: {
-    backgroundColor: "rgba(255, 214, 10, 0.22)",
-    borderColor: "#FFD60A",
-  },
-  chipBad: {
-    backgroundColor: "rgba(211, 47, 47, 0.28)",
-    borderColor: "#FF8A8A",
-  },
-  chipIdle: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderColor: "rgba(255,255,255,0.28)",
-  },
-  nudgeRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 14,
-    marginBottom: 10,
-    minHeight: 40,
-  },
-  guideTitle: {
-    color: "#fff",
-    fontSize: 19,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  guideSubtitle: {
-    color: "rgba(255,255,255,0.88)",
-    fontSize: 14,
-    textAlign: "center",
-    marginTop: 8,
-    lineHeight: 21,
-    paddingHorizontal: 4,
-  },
-  scanningText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "700",
-    marginTop: 12,
-  },
-  scanningSub: {
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 13,
-    marginTop: 6,
-  },
-  hintBanner: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 12,
-    lineHeight: 19,
-    paddingHorizontal: 8,
-  },
-  fallbackBtn: {
-    marginTop: 18,
-    backgroundColor: "#fff",
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 14,
-    alignSelf: "stretch",
-    maxWidth: 340,
-  },
-  fallbackBtnText: {
-    color: "#0B3D2E",
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-
   permBox: { paddingHorizontal: 28, alignItems: "center" },
   permTitle: {
     color: "#fff",

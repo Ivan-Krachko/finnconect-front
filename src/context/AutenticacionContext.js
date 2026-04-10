@@ -16,8 +16,16 @@ export function AuthProvider({ children }) {
     setToken(null);
   };
 
+  const signUp = async (payload) => {
+    const result = await autenticacionService.registrar(payload);
+    if (result?.token) {
+      setToken(result.token);
+    }
+    return result;
+  };
+
   return (
-    <autenticacionContext.Provider value={{ token, signIn, signOut }}>
+    <autenticacionContext.Provider value={{ token, signIn, signUp, signOut }}>
       {children}
     </autenticacionContext.Provider>
   );

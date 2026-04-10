@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
-    "mock": "cross-env EXPO_PUBLIC_API_HOST=http://localhost:3000 expo start",
+    "mock": "node ./scripts/use-mock-api.js && expo start -c",
     "api:set": "node ./scripts/set-api-host.js",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
@@ -22,6 +22,8 @@
     "expo": "~54.0.33",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
+    "expo-face-detector": "^13.0.2",
+    "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",

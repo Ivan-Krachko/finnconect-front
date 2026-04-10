@@ -7,6 +7,8 @@ import { useRouter } from "expo-router";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -63,7 +65,9 @@ export default function RegistroScreen() {
   });
   const [error, setError] = useState("");
 
-  const [facePhase, setFacePhase] = useState<"preview" | "scanning" | "validating">("preview");
+  const [facePhase, setFacePhase] = useState<"preview" | "scanning" | "recognized" | "validating">(
+    "preview"
+  );
   const [registering, setRegistering] = useState(false);
   const [faceHint, setFaceHint] = useState("");
   const [faceGuide, setFaceGuide] = useState<FaceGuide | null>(null);
@@ -73,8 +77,12 @@ export default function RegistroScreen() {
   const cameraRef = useRef<InstanceType<typeof CameraView> | null>(null);
   const registrationStartedRef = useRef(false);
   const renaperTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recognitionDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Sin esto, las primeras capturas pueden salir vacías / sin foco (docs: esperar onCameraReady). */
   const [cameraReady, setCameraReady] = useState(false);
+
+  const recognitionScale = useRef(new Animated.Value(0)).current;
+  const recognitionFade = useRef(new Animated.Value(0)).current;
 
   const validateForm = (): boolean => {
     if (!form.nombre.trim() || !form.apellido.trim()) {
@@ -250,11 +258,11 @@ export default function RegistroScreen() {
         setFaceGuide({
           ...guide,
           title: "Listo",
-          subtitle: "Validando con Renaper…",
+          subtitle: "¡Rostro reconocido!",
         });
         cancelled = true;
         if (intervalId) clearInterval(intervalId);
-        setFacePhase("validating");
+        setFacePhase("recognized");
       } catch (e: unknown) {
         if (uri) {
           await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
@@ -304,13 +312,55 @@ export default function RegistroScreen() {
     };
   }, [facePhase, verifyMode, cameraReady, runFallbackVerification]);
 
-  /** Sin detector nativo (p. ej. web): pasar a validación Renaper al instante. */
+  /** Sin detector nativo (p. ej. web): breve pausa y misma animación de “reconocido”. */
   useEffect(() => {
     if (step !== "face" || verifyMode !== "fallback") return;
     if (facePhase !== "scanning") return;
-    const t = setTimeout(() => setFacePhase("validating"), 400);
+    const t = setTimeout(() => {
+      setAlignProgress(1);
+      setFacePhase("recognized");
+    }, 400);
     return () => clearTimeout(t);
   }, [step, verifyMode, facePhase]);
+
+  /** Animación al reconocer el rostro (antes de Renaper). */
+  useEffect(() => {
+    if (facePhase !== "recognized") return;
+    recognitionScale.setValue(0);
+    recognitionFade.setValue(0);
+    Animated.parallel([
+      Animated.timing(recognitionFade, {
+        toValue: 1,
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(recognitionScale, {
+        toValue: 1,
+        friction: 7,
+        tension: 128,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // recognitionScale / recognitionFade son Animated.Value estables (misma instancia).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver arriba
+  }, [facePhase]);
+
+  /** Tras la animación de reconocimiento, abre Renaper. */
+  useEffect(() => {
+    if (step !== "face" || facePhase !== "recognized") return;
+    recognitionDelayRef.current = setTimeout(() => {
+      recognitionDelayRef.current = null;
+      setFacePhase("validating");
+    }, 1700);
+    return () => {
+      if (recognitionDelayRef.current) {
+        clearTimeout(recognitionDelayRef.current);
+        recognitionDelayRef.current = null;
+      }
+    };
+  }, [step, facePhase]);
 
   /** Tras mostrar la ventana Renaper, a los 15 s se crea la cuenta. */
   useEffect(() => {
@@ -330,6 +380,10 @@ export default function RegistroScreen() {
   const handleBack = () => {
     if (step === "face") {
       if (registering) return;
+      if (facePhase === "recognized" && recognitionDelayRef.current) {
+        clearTimeout(recognitionDelayRef.current);
+        recognitionDelayRef.current = null;
+      }
       if (facePhase === "validating" && renaperTimeoutRef.current) {
         clearTimeout(renaperTimeoutRef.current);
         renaperTimeoutRef.current = null;
@@ -376,15 +430,18 @@ export default function RegistroScreen() {
     }
 
     const ovalVisual = ovalVisualFromGuide(faceGuide, alignProgress);
+    const ovalBorderVisual = facePhase === "recognized" ? "success" : ovalVisual;
 
     const guidanceLine =
-      verifyMode === "fallback"
-        ? faceHint || "No hay detector facial en este entorno."
-        : facePhase === "preview"
-          ? "Ubicá tu cara en el óvalo y tocá continuar"
-          : faceGuide
-            ? faceGuide.subtitle.trim() || faceGuide.title
-            : "Ubicá tu cara en el óvalo y tocá continuar";
+      facePhase === "recognized"
+        ? "¡Rostro reconocido!"
+        : verifyMode === "fallback"
+          ? faceHint || "No hay detector facial en este entorno."
+          : facePhase === "preview"
+            ? "Ubicá tu cara en el óvalo y tocá continuar"
+            : faceGuide
+              ? faceGuide.subtitle.trim() || faceGuide.title
+              : "Ubicá tu cara en el óvalo y tocá continuar";
 
     const topInsetPad = insets.top + (Platform.OS === "ios" ? 12 : 10);
 
@@ -453,14 +510,40 @@ export default function RegistroScreen() {
                     <View
                       style={[
                         s.ovalBorder,
-                        ovalVisual === "neutral" && s.ovalBorderNeutral,
-                        ovalVisual === "warn" && s.ovalBorderWarn,
-                        ovalVisual === "bad" && s.ovalBorderBad,
-                        ovalVisual === "success" && s.ovalBorderSuccess,
+                        ovalBorderVisual === "neutral" && s.ovalBorderNeutral,
+                        ovalBorderVisual === "warn" && s.ovalBorderWarn,
+                        ovalBorderVisual === "bad" && s.ovalBorderBad,
+                        ovalBorderVisual === "success" && s.ovalBorderSuccess,
                       ]}
                     />
                   }
                 />
+                {facePhase === "recognized" ? (
+                  <View style={s.recognitionLayer} pointerEvents="none">
+                    <Animated.View
+                      style={[
+                        s.recognitionVeil,
+                        {
+                          opacity: recognitionFade,
+                        },
+                      ]}
+                    />
+                    <Animated.View
+                      style={[
+                        s.recognitionCenter,
+                        {
+                          opacity: recognitionFade,
+                          transform: [{ scale: recognitionScale }],
+                        },
+                      ]}
+                    >
+                      <View style={s.recognitionIconCircle}>
+                        <Ionicons name="checkmark" size={44} color="#fff" />
+                      </View>
+                      <Text style={s.recognitionCaption}>Rostro reconocido</Text>
+                    </Animated.View>
+                  </View>
+                ) : null}
               </View>
             </View>
           ) : null}
@@ -728,7 +811,40 @@ const s = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 21,
   },
-  maskArea: { flex: 1, minHeight: 0 },
+  maskArea: { flex: 1, minHeight: 0, position: "relative" },
+  recognitionLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recognitionVeil: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255,255,255,0.88)",
+  },
+  recognitionCenter: {
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  recognitionIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: FACE_PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: FACE_PRIMARY,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  recognitionCaption: {
+    marginTop: 16,
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#0B3D2E",
+    letterSpacing: 0.2,
+  },
   renaperModalInner: {
     flex: 1,
     justifyContent: "center",

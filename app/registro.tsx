@@ -8,6 +8,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState }
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -62,7 +63,7 @@ export default function RegistroScreen() {
   });
   const [error, setError] = useState("");
 
-  const [facePhase, setFacePhase] = useState<"preview" | "scanning" | "done">("preview");
+  const [facePhase, setFacePhase] = useState<"preview" | "scanning" | "validating">("preview");
   const [registering, setRegistering] = useState(false);
   const [faceHint, setFaceHint] = useState("");
   const [faceGuide, setFaceGuide] = useState<FaceGuide | null>(null);
@@ -71,6 +72,7 @@ export default function RegistroScreen() {
 
   const cameraRef = useRef<InstanceType<typeof CameraView> | null>(null);
   const registrationStartedRef = useRef(false);
+  const renaperTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Sin esto, las primeras capturas pueden salir vacías / sin foco (docs: esperar onCameraReady). */
   const [cameraReady, setCameraReady] = useState(false);
 
@@ -110,12 +112,6 @@ export default function RegistroScreen() {
   const completeRegistration = useCallback(async () => {
     if (registrationStartedRef.current) return;
     registrationStartedRef.current = true;
-    setFacePhase("done");
-    try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      /* ignore */
-    }
     setRegistering(true);
     setError("");
     try {
@@ -127,6 +123,11 @@ export default function RegistroScreen() {
         genero: form.genero,
         password: form.password,
       });
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {
+        /* ignore */
+      }
       router.replace("/home");
     } catch (e: unknown) {
       registrationStartedRef.current = false;
@@ -138,14 +139,12 @@ export default function RegistroScreen() {
     }
   }, [form, signUp, router]);
 
-  /** Sin ML no podemos saber si el rostro está en el óvalo: no se auto-completa el registro. */
+  /** Sin ML no podemos saber si el rostro está en el óvalo: se sigue el mismo flujo Renaper (desarrollo). */
   const runFallbackVerification = useCallback((customHint?: string) => {
     setFaceHint(
       customHint ??
         "Aquí no hay detector facial disponible (p. ej. web o falló TensorFlow.js). " +
-          "No podemos comprobar que tu cara esté en el óvalo. " +
-          "Podés usar un build nativo (`npx expo run:ios` / `run:android`) con ML Kit. " +
-          "Solo en desarrollo podés continuar con el botón de abajo."
+          "Seguimos con la validación simulada con Renaper."
     );
   }, []);
 
@@ -251,10 +250,11 @@ export default function RegistroScreen() {
         setFaceGuide({
           ...guide,
           title: "Listo",
-          subtitle: "Tocá Continuar para finalizar.",
+          subtitle: "Validando con Renaper…",
         });
         cancelled = true;
         if (intervalId) clearInterval(intervalId);
+        setFacePhase("validating");
       } catch (e: unknown) {
         if (uri) {
           await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
@@ -302,11 +302,38 @@ export default function RegistroScreen() {
       cancelled = true;
       if (intervalId) clearInterval(intervalId);
     };
-  }, [facePhase, verifyMode, cameraReady, completeRegistration, runFallbackVerification]);
+  }, [facePhase, verifyMode, cameraReady, runFallbackVerification]);
+
+  /** Sin detector nativo (p. ej. web): pasar a validación Renaper al instante. */
+  useEffect(() => {
+    if (step !== "face" || verifyMode !== "fallback") return;
+    if (facePhase !== "scanning") return;
+    const t = setTimeout(() => setFacePhase("validating"), 400);
+    return () => clearTimeout(t);
+  }, [step, verifyMode, facePhase]);
+
+  /** Tras mostrar la ventana Renaper, a los 15 s se crea la cuenta. */
+  useEffect(() => {
+    if (step !== "face" || facePhase !== "validating") return;
+    renaperTimeoutRef.current = setTimeout(() => {
+      renaperTimeoutRef.current = null;
+      void completeRegistration();
+    }, 15000);
+    return () => {
+      if (renaperTimeoutRef.current) {
+        clearTimeout(renaperTimeoutRef.current);
+        renaperTimeoutRef.current = null;
+      }
+    };
+  }, [step, facePhase, completeRegistration]);
 
   const handleBack = () => {
     if (step === "face") {
       if (registering) return;
+      if (facePhase === "validating" && renaperTimeoutRef.current) {
+        clearTimeout(renaperTimeoutRef.current);
+        renaperTimeoutRef.current = null;
+      }
       setStep("form");
       setFacePhase("preview");
       setVerifyMode("idle");
@@ -353,40 +380,52 @@ export default function RegistroScreen() {
     const guidanceLine =
       verifyMode === "fallback"
         ? faceHint || "No hay detector facial en este entorno."
-        : facePhase === "preview" || verifyMode === "idle"
+        : facePhase === "preview"
           ? "Ubicá tu cara en el óvalo y tocá continuar"
           : faceGuide
             ? faceGuide.subtitle.trim() || faceGuide.title
             : "Ubicá tu cara en el óvalo y tocá continuar";
 
-    const canTapContinue =
-      verifyMode === "fallback"
-        ? !registering
-        : Boolean(faceGuide?.ready && facePhase === "scanning" && !registering);
-
     const topInsetPad = insets.top + (Platform.OS === "ios" ? 12 : 10);
 
     return (
-      <View style={s.faceRoot}>
-        <View style={s.faceChrome} pointerEvents="box-none">
-          {facePhase === "done" ? (
-            <>
-              <View style={[s.topBar, { paddingTop: topInsetPad }]}>
-                <View style={s.topBarRow}>
-                  <Pressable onPress={handleBack} style={s.topBarSide} hitSlop={14} disabled={registering}>
-                    <Ionicons name="chevron-back" size={24} color="#6B7280" />
-                  </Pressable>
-                  <Text style={s.topTitle}>
-                    {registering ? "Creando tu cuenta…" : "Rostro verificado."}
-                  </Text>
-                  <View style={s.topBarSide} />
+      <>
+        <Modal
+          visible={facePhase === "validating"}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            if (!registering) handleBack();
+          }}
+        >
+          <LinearGradient
+            colors={["#080E0B", "#0B1612", "#0E1F18"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          >
+            <View
+              style={[
+                s.renaperModalInner,
+                { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 },
+              ]}
+            >
+              <View style={s.renaperCard}>
+                <View style={s.renaperIconWrap}>
+                  <Ionicons name="shield-checkmark" size={40} color={FACE_PRIMARY} />
                 </View>
-                {registering ? <ActivityIndicator color={FACE_PRIMARY} style={{ marginTop: 10 }} /> : null}
+                <Text style={s.renaperTitle}>Validando los datos con el Renaper</Text>
+                <Text style={s.renaperSubtitle}>Esto puede tardar unos minutos.</Text>
+                <ActivityIndicator color={FACE_PRIMARY} size="large" style={{ marginTop: 28 }} />
+                {registering ? <Text style={s.renaperCreating}>Creando tu cuenta…</Text> : null}
               </View>
-              <View style={[s.fillLight, { paddingBottom: insets.bottom + 8 }]} />
-            </>
-          ) : (
-            <>
+            </View>
+          </LinearGradient>
+        </Modal>
+
+        <View style={s.faceRoot}>
+          {facePhase !== "validating" ? (
+            <View style={s.faceChrome} pointerEvents="box-none">
               <View style={[s.topBar, { paddingTop: topInsetPad }]}>
                 <View style={s.topBarRow}>
                   <Pressable onPress={handleBack} style={s.topBarSide} hitSlop={14}>
@@ -423,21 +462,10 @@ export default function RegistroScreen() {
                   }
                 />
               </View>
-              <View style={[s.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
-                  <Pressable
-                    style={[s.continueBtn, !canTapContinue && s.continueBtnDisabled]}
-                    disabled={!canTapContinue}
-                    onPress={() => void completeRegistration()}
-                  >
-                    <Text style={s.continueBtnText}>
-                      {verifyMode === "fallback" ? "Continuar (desarrollo)" : "Continuar"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </>
-            )}
+            </View>
+          ) : null}
         </View>
-      </View>
+      </>
     );
   }
 
@@ -701,23 +729,49 @@ const s = StyleSheet.create({
     lineHeight: 21,
   },
   maskArea: { flex: 1, minHeight: 0 },
-  bottomBar: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    backgroundColor: FACE_UI_SURFACE,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(0,0,0,0.06)",
+  renaperModalInner: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
   },
-  continueBtn: {
-    backgroundColor: FACE_PRIMARY,
-    paddingVertical: 15,
-    borderRadius: 12,
+  renaperCard: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 22,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+  },
+  renaperIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(31,167,116,0.2)",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 20,
   },
-  continueBtnDisabled: { opacity: 0.45 },
-  continueBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  fillLight: { flex: 1, backgroundColor: FACE_UI_SURFACE },
+  renaperTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 27,
+  },
+  renaperSubtitle: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 15,
+    textAlign: "center",
+    marginTop: 12,
+    lineHeight: 22,
+  },
+  renaperCreating: {
+    color: "#4ADE80",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 20,
+    textAlign: "center",
+  },
   ovalBorder: {
     width: FACE_OVAL_W - 8,
     height: FACE_OVAL_H - 8,

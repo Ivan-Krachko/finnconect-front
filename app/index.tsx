@@ -151,6 +151,12 @@ export default function Login() {
             <Text style={s.footerLink}>Registrate</Text>
           </Pressable>
         </View>
+        <Pressable
+          style={s.footerPractice}
+          onPress={() => router.push("/probar-reconocimiento")}
+        >
+          <Text style={s.footerPracticeText}>Probar reconocimiento facial</Text>
+        </Pressable>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -285,4 +291,16 @@ const s = StyleSheet.create({
   },
   footerText: { color: "rgba(255,255,255,0.7)", fontSize: 14 },
   footerLink: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  footerPractice: {
+    alignSelf: "center",
+    marginTop: 14,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  footerPracticeText: {
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 14,
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
 });

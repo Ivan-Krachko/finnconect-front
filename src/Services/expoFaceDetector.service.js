@@ -1,11 +1,16 @@
 /**
- * Detección facial con **expo-face-detector** (Google ML Kit en iOS/Android).
- * No usar import estático: en Expo Go el nativo `ExpoFaceDetector` no existe y rompe el bundle.
+ * Detección facial: primero **expo-face-detector** (ML Kit) en dev build;
+ * si no hay módulo nativo (p. ej. Expo Go), **TensorFlow.js + BlazeFace** en JS.
  *
- * En builds nativos (`npx expo run:ios|android` o EAS): `detectFacesFromImageUri` funciona.
+ * Importante: no hacer `require("expo-face-detector")` si el nativo no existe: ese paquete
+ * ejecuta `requireNativeModule('ExpoFaceDetector')` al cargar y lanza (Expo Go lo quitó).
  */
 import Constants from "expo-constants";
+import { requireOptionalNativeModule } from "expo-modules-core";
 import { Platform } from "react-native";
+import { detectFacesFromImageUriWithTfjs } from "./tfjsBlazefaceFaceDetector.service";
+
+export { ensureTfjsFaceDetectorReady, detectFacesFromImageUriWithTfjs } from "./tfjsBlazefaceFaceDetector.service";
 
 export function canUseNativeFaceDetector() {
   if (Platform.OS === "web") return false;
@@ -17,10 +22,17 @@ export function canUseNativeFaceDetector() {
 let _faceDetectorModule;
 let _faceDetectorTried = false;
 
-/** Carga única de `expo-face-detector` (require perezoso). */
+/**
+ * Carga única del módulo JS `expo-face-detector` solo si el nativo `ExpoFaceDetector` está registrado.
+ */
 export function requireExpoFaceDetector() {
   if (_faceDetectorTried) return _faceDetectorModule;
   _faceDetectorTried = true;
+  const native = requireOptionalNativeModule("ExpoFaceDetector");
+  if (!native) {
+    _faceDetectorModule = null;
+    return null;
+  }
   try {
     _faceDetectorModule = require("expo-face-detector");
   } catch {
@@ -33,14 +45,20 @@ export function requireExpoFaceDetector() {
  * @param {string} uri file:// de la imagen (p. ej. salida de takePictureAsync)
  * @param {import('expo-face-detector').DetectionOptions} [options]
  * @returns {Promise<import('expo-face-detector').DetectionResult | null>}
- *          `null` si el módulo no está disponible
  */
 export async function detectFacesFromImageUri(uri, options) {
-  if (!canUseNativeFaceDetector()) return null;
-  const FaceDetector = requireExpoFaceDetector();
-  if (!FaceDetector) return null;
-  return FaceDetector.detectFacesAsync(uri, {
-    mode: FaceDetector.FaceDetectorMode.accurate,
-    ...options,
-  });
+  if (canUseNativeFaceDetector()) {
+    const FaceDetector = requireExpoFaceDetector();
+    if (FaceDetector) {
+      try {
+        return await FaceDetector.detectFacesAsync(uri, {
+          mode: FaceDetector.FaceDetectorMode.accurate,
+          ...options,
+        });
+      } catch {
+        /* intentar TF.js */
+      }
+    }
+  }
+  return detectFacesFromImageUriWithTfjs(uri);
 }

@@ -1,0 +1,25 @@
+diff --git a/node_modules/@expo/cli/build/src/run/ios/XcodeBuild.js b/node_modules/@expo/cli/build/src/run/ios/XcodeBuild.js
+index 6169d01..717548b 100644
+--- a/node_modules/@expo/cli/build/src/run/ios/XcodeBuild.js
++++ b/node_modules/@expo/cli/build/src/run/ios/XcodeBuild.js
+@@ -221,6 +221,11 @@ function getProcessOptions({ packager, shouldSkipInitialBundling, terminal, port
+     };
+ }
+ async function getXcodeBuildArgsAsync(props) {
++    // Xcode 26: `-destination id=<udid>` solo a veces resuelve simuladores; hace falta el prefijo explícito.
++    // `generic/platform=iOS Simulator` compila pero puede dejar un .app con arquitectura incompatible al instalar.
++    const destination = props.isSimulator
++        ? `platform=iOS Simulator,id=${props.device.udid}`
++        : `id=${props.device.udid}`;
+     const args = [
+         props.xcodeProject.isWorkspace ? '-workspace' : '-project',
+         props.xcodeProject.name,
+@@ -229,7 +234,7 @@ async function getXcodeBuildArgsAsync(props) {
+         '-scheme',
+         props.scheme,
+         '-destination',
+-        `id=${props.device.udid}`
++        destination
+     ];
+     if (!props.isSimulator || (0, _simulatorCodeSigning.simulatorBuildRequiresCodeSigning)(props.projectRoot)) {
+         const developmentTeamId = await (0, _configureCodeSigning.ensureDeviceIsCodeSignedForDeploymentAsync)(props.projectRoot);

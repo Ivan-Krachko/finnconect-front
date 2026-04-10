@@ -1,5 +1,42 @@
 import { API_HOST } from "../config/api";
 
+/**
+ * Mensaje legible ante 400 "Validation failed" (Zod, etc.)
+ */
+function formatRegisterErrorMessage(json) {
+  const raw = json?.message;
+  const parts = [];
+
+  const pushIssues = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const item of arr) {
+      if (!item) continue;
+      const path = Array.isArray(item.path)
+        ? item.path.filter(Boolean).join(".")
+        : item.field || item.param || "";
+      const msg = item.message || item.msg || String(item);
+      if (path && msg) parts.push(`${path}: ${msg}`);
+      else if (msg) parts.push(msg);
+    }
+  };
+
+  pushIssues(json.errors);
+  pushIssues(json.issues);
+  pushIssues(json.error?.issues);
+  pushIssues(json.error?.errors);
+
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+  if (raw && raw !== "Validation failed") {
+    return raw;
+  }
+  if (raw === "Validation failed") {
+    return "Los datos no cumplen la validación del servidor. Revisá DNI, email y demás campos.";
+  }
+  return raw || "Error al registrarse";
+}
+
 export const login = async (email, password) => {
   const response = await fetch(`${API_HOST}/auth/login`, {
     method: "POST",
@@ -57,11 +94,7 @@ export const registrar = async (data) => {
   }
 
   if (!response.ok) {
-    const firstErr =
-      Array.isArray(json.errors) && json.errors.length > 0
-        ? json.errors.map((e) => e?.message).filter(Boolean).join(" ")
-        : "";
-    throw new Error(json.message || firstErr || "Error al registrarse");
+    throw new Error(formatRegisterErrorMessage(json));
   }
 
   return json.result;

@@ -1,0 +1,7 @@
+{
+  "name": "react-native-fs",
+  "version": "2.20.0-stub",
+  "description": "Stub for Expo Go: tfjs-react-native bundles bundle_resource_io which requires RNFS; BlazeFace does not use it.",
+  "main": "index.js",
+  "private": true
+}

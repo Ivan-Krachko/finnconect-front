@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as movimientosService from "../src/Services/movimientos.service";
+import { formatFiatByCurrency } from "../src/utils/formatNumber";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type FilterKey = "todas" | "ingresos" | "gastos";
@@ -33,10 +34,6 @@ const FILTERS: { key: FilterKey; label: string; sentido?: string }[] = [
   { key: "ingresos", label: "Ingresos", sentido: "ingreso" },
   { key: "gastos", label: "Gastos", sentido: "egreso" },
 ];
-
-function fmtArs(n: number) {
-  return new Intl.NumberFormat("es-AR").format(Math.abs(n));
-}
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -96,14 +93,18 @@ export default function TransaccionesScreen() {
               <Ionicons name="arrow-down" size={16} color="#4ADE80" />
             </View>
             <Text style={s.summaryLabel}>Ingresos</Text>
-            <Text style={[s.summaryValue, { color: "#4ADE80" }]}>+${fmtArs(totalIngresos)}</Text>
+            <Text style={[s.summaryValue, { color: "#4ADE80" }]}>
+              +${formatFiatByCurrency(totalIngresos, "ARS")}
+            </Text>
           </View>
           <View style={[s.summaryBox, { borderColor: "rgba(239,68,68,0.2)" }]}>
             <View style={[s.summaryIcon, { backgroundColor: "rgba(239,68,68,0.12)" }]}>
               <Ionicons name="arrow-up" size={16} color="#EF4444" />
             </View>
             <Text style={s.summaryLabel}>Gastos</Text>
-            <Text style={[s.summaryValue, { color: "#EF4444" }]}>-${fmtArs(totalGastos)}</Text>
+            <Text style={[s.summaryValue, { color: "#EF4444" }]}>
+              -${formatFiatByCurrency(totalGastos, "ARS")}
+            </Text>
           </View>
         </View>
 
@@ -153,7 +154,7 @@ export default function TransaccionesScreen() {
                   <Text style={s.txMeta}>{t.tipoOperacion} · {date}, {time}</Text>
                 </View>
                 <Text style={[s.txAmount, { color: isIncome ? "#4ADE80" : "#EF4444" }]}>
-                  {isIncome ? "+" : "-"}${fmtArs(montoNum)}
+                  {isIncome ? "+" : "-"}${formatFiatByCurrency(montoNum, "ARS")}
                 </Text>
               </View>
             );

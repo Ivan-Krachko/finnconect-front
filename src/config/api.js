@@ -1,12 +1,14 @@
 import Constants from "expo-constants";
 
-const FALLBACK =
-  "https://e9d5-2803-9800-98c0-7212-157c-7725-14b1-32e5.ngrok-free.app";
+/** Debe coincidir con `scripts/api-host-defaults.cjs` (API oficial). */
+const OFFICIAL_FALLBACK =
+  "https://5dac-2803-9800-98c0-7212-3018-8ae3-91ef-c0c5.ngrok-free.app";
 
 /**
  * Host base de la API.
- * Prioridad: extra.apiHost (app.config.js, runtime) → EXPO_PUBLIC_* → fallback.
- * `npm run mock` escribe .env.local y `expo start -c` evita bundle viejo.
+ * Prioridad: extra.apiHost (app.config.js) → EXPO_PUBLIC_API_HOST → oficial por defecto.
+ * - `npm start` → scripts/use-official-api.js escribe .env.local con la API oficial.
+ * - `npm run mock` → use-mock-api.js escribe localhost (backend con MOCK=true).
  */
 const extra = Constants.expoConfig?.extra;
 const fromExtra =
@@ -17,4 +19,11 @@ const fromExtra =
 export const API_HOST =
   fromExtra ||
   process.env.EXPO_PUBLIC_API_HOST ||
-  FALLBACK;
+  OFFICIAL_FALLBACK;
+
+/** true si arrancaste con `npm run mock` (backend local mockeado). */
+export const USE_MOCK =
+  extra &&
+  typeof extra === "object" &&
+  "useMock" in extra &&
+  extra.useMock === true;

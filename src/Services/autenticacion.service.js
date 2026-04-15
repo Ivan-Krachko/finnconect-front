@@ -1,4 +1,5 @@
 import { API_HOST } from "../config/api";
+import { getMe } from "./usuarios.service";
 
 /**
  * Mensaje legible ante 400 "Validation failed" (Zod, etc.)
@@ -100,10 +101,8 @@ export const registrar = async (data) => {
   return json.result;
 };
 
-export const getUsuarioActual = async () => {
-  return {
-    id: 1,
-    name: "Ivan",
-    email: "ivan@mail.com",
-  };
+/** @deprecated Usar `getMe(token)` desde usuarios.service */
+export const getUsuarioActual = async (token) => {
+  if (!token) return null;
+  return getMe(token);
 };

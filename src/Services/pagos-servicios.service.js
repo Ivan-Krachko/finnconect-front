@@ -20,6 +20,15 @@ async function parseResponse(response) {
   return data;
 }
 
+/** Historial de pagos de servicio del usuario (empresa, monto, fecha). */
+export const getMisPagosServicios = async (token) => {
+  const response = await fetch(`${API_HOST}/pagos-servicios/mine`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  return parseResponse(response);
+};
+
 export const getPagosServicios = async (token, { page = 1, pageSize = 20, facturaId, cuentaId } = {}) => {
   const params = new URLSearchParams({ page, pageSize });
   if (facturaId) params.set("facturaId", facturaId);

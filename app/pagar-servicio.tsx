@@ -17,6 +17,7 @@ import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as facturasService from "../src/Services/facturas.service";
 import * as pagosServiciosService from "../src/Services/pagos-servicios.service";
+import { formatFiatByCurrency } from "../src/utils/formatNumber";
 
 interface Factura {
   id: number;
@@ -31,10 +32,6 @@ interface Cuenta {
   alias: string;
   moneda: string;
   saldo: string;
-}
-
-function fmtArs(n: number) {
-  return new Intl.NumberFormat("es-AR").format(Math.round(n));
 }
 
 export default function PagarServicioScreen() {
@@ -130,7 +127,7 @@ export default function PagarServicioScreen() {
                   </View>
                   <View style={s.facturaInfo}>
                     <Text style={s.facturaDesc}>{desc}</Text>
-                    <Text style={s.facturaMonto}>${fmtArs(monto)}</Text>
+                    <Text style={s.facturaMonto}>${formatFiatByCurrency(monto, "ARS")}</Text>
                   </View>
                 </View>
                 <Text style={s.cuentaLabel}>Pagar desde</Text>
@@ -150,7 +147,7 @@ export default function PagarServicioScreen() {
                         {c.alias} · {c.moneda}
                       </Text>
                       <Text style={s.cuentaOptionSaldo}>
-                        ${fmtArs(parseFloat(c.saldo) || 0)}
+                        ${formatFiatByCurrency(parseFloat(c.saldo) || 0, c.moneda)}
                       </Text>
                       {pagando === f.id ? (
                         <ActivityIndicator size="small" color="#1FA774" />

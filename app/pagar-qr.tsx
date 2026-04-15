@@ -17,6 +17,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
+import { formatFiatByCurrency } from "../src/utils/formatNumber";
 
 function parseCobrarQr(data: string): { alias: string; monto: string; moneda: string } | null {
   try {
@@ -31,13 +32,6 @@ function parseCobrarQr(data: string): { alias: string; monto: string; moneda: st
   } catch {
     return null;
   }
-}
-
-function fmtAmount(n: number, moneda: string) {
-  if (moneda === "ARS" || moneda === "JPY" || moneda === "BRL") {
-    return new Intl.NumberFormat("es-AR").format(Math.round(n));
-  }
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 interface CuentaDestino {
@@ -220,7 +214,7 @@ export default function PagarQRScreen() {
   if (confirmacion) {
     const { parsed, cuentaDestino, cuentaOrigen } = confirmacion;
     const montoNum = parseFloat(parsed.monto) || 0;
-    const montoFmt = fmtAmount(montoNum, parsed.moneda);
+    const montoFmt = formatFiatByCurrency(montoNum, parsed.moneda);
     const simbolo = parsed.moneda === "ARS" ? "$" : "";
     const destinoNombre = [cuentaDestino.usuarioNombre, cuentaDestino.usuarioApellido]
       .filter(Boolean)

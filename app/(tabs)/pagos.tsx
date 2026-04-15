@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useContext, useState } from "react";
 import {
   Platform,
   Pressable,
@@ -9,6 +11,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import * as pagosServiciosService from "../../src/Services/pagos-servicios.service";
+import { formatDecimalEsAR } from "../../src/utils/formatNumber";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -65,58 +70,22 @@ const QUICK_ACTIONS: QuickAction[] = [
   },
 ];
 
-const PAYMENTS: Payment[] = [
-  {
-    id: "1",
-    company: "Netflix Inc.",
-    description: "Suscripción Mensual",
-    amount: 15123.99,
-    date: "24 de Octubre",
-    status: "completado",
-    icon: "play-circle",
-    color: "#E50914",
-  },
-  {
-    id: "2",
-    company: "Starbucks Coffee",
-    description: "Café de la Mañana",
-    amount: 4143.5,
-    date: "23 de Octubre",
-    status: "completado",
-    icon: "cafe",
-    color: "#00704A",
-  },
-  {
-    id: "3",
-    company: "Tienda de Juegos",
-    description: "Compra de Activo Digital",
-    amount: 85832.0,
-    date: "22 de Octubre",
-    status: "pendiente",
-    icon: "game-controller",
-    color: "#3B82F6",
-  },
-  {
-    id: "4",
-    company: "Electricidad S.A.",
-    description: "Factura de Servicios",
-    amount: 17292.3,
-    date: "21 de Octubre",
-    status: "fallido",
-    icon: "flash",
-    color: "#F59E0B",
-  },
-  {
-    id: "5",
-    company: "Uber Technologies",
-    description: "Viaje en Taxi",
-    amount: 2244.1,
-    date: "20 de Octubre",
-    status: "completado",
-    icon: "car",
-    color: "#6B7280",
-  },
-];
+function categoriaToIconColor(
+  cat: string | null | undefined
+): { icon: IconName; color: string } {
+  switch (cat) {
+    case "luz":
+      return { icon: "flash", color: "#F59E0B" };
+    case "agua":
+      return { icon: "water-outline", color: "#3B82F6" };
+    case "internet":
+      return { icon: "wifi", color: "#1FA774" };
+    case "streaming":
+      return { icon: "play-circle", color: "#E50914" };
+    default:
+      return { icon: "business", color: "#6B7280" };
+  }
+}
 
 const STATUS_CONFIG: Record<
   PaymentStatus,
@@ -128,10 +97,7 @@ const STATUS_CONFIG: Record<
 };
 
 function fmtAmount(n: number): string {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
+  return formatDecimalEsAR(n, 2, 2);
 }
 
 /* ── Screen ── */
@@ -139,6 +105,45 @@ function fmtAmount(n: number): string {
 export default function PagosScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { token } = useContext(autenticacionContext);
+  const [payments, setPayments] = useState<Payment[]>([]);
+
+  const loadPagos = useCallback(() => {
+    if (!token) {
+      setPayments([]);
+      return;
+    }
+    pagosServiciosService
+      .getMisPagosServicios(token)
+      .then((data: { items?: any[] }) => {
+        const rows = (data.items || []).map((row) => {
+          const { icon, color } = categoriaToIconColor(row.categoria);
+          const amount = parseFloat(row.monto) || 0;
+          const d = row.createdAt ? new Date(row.createdAt) : new Date();
+          return {
+            id: String(row.id),
+            company: row.empresaNombre || "Servicio",
+            description: row.categoria ? String(row.categoria) : "Pago de servicio",
+            amount,
+            date: d.toLocaleDateString("es-AR", {
+              day: "numeric",
+              month: "long",
+            }),
+            status: "completado" as PaymentStatus,
+            icon,
+            color,
+          };
+        });
+        setPayments(rows);
+      })
+      .catch(() => setPayments([]));
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPagos();
+    }, [loadPagos])
+  );
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -153,13 +158,6 @@ export default function PagosScreen() {
         </Pressable>
         <Text style={s.headerTitle}>Pagos</Text>
         <View style={s.headerRight}>
-          <Pressable hitSlop={8}>
-            <Ionicons
-              name="notifications-outline"
-              size={22}
-              color="rgba(255,255,255,0.8)"
-            />
-          </Pressable>
           <View style={s.avatar}>
             <Ionicons name="person" size={14} color="#0B3D2E" />
           </View>
@@ -196,14 +194,23 @@ export default function PagosScreen() {
         <Text style={s.sectionHeading}>Pagos Recientes</Text>
 
         <View style={s.paymentsList}>
-          {PAYMENTS.map((payment, i) => {
+          {payments.length === 0 && (
+            <View style={s.emptyWrap}>
+              <Text style={s.emptyText}>
+                {token
+                  ? "Todavía no registraste pagos de servicio."
+                  : "Iniciá sesión para ver tu historial de pagos."}
+              </Text>
+            </View>
+          )}
+          {payments.map((payment, i) => {
             const status = STATUS_CONFIG[payment.status];
             return (
               <View
                 key={payment.id}
                 style={[
                   s.paymentRow,
-                  i < PAYMENTS.length - 1 && s.paymentBorder,
+                  i < payments.length - 1 && s.paymentBorder,
                 ]}
               >
                 <View
@@ -413,5 +420,14 @@ const s = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     fontWeight: "700",
+  },
+  emptyWrap: {
+    padding: 24,
+  },
+  emptyText: {
+    color: DIM,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
   },
 });

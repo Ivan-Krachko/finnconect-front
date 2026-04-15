@@ -24,7 +24,8 @@ const trimmed = url.replace(/\/$/, "");
 const envPath = path.join(__dirname, "..", ".env.local");
 const content =
   `# Generado por scripts/set-api-host.js — no commitear (está en .gitignore)\n` +
-  `EXPO_PUBLIC_API_HOST=${trimmed}\n`;
+  `EXPO_PUBLIC_API_HOST=${trimmed}\n` +
+  `EXPO_PUBLIC_USE_MOCK=0\n`;
 
 fs.writeFileSync(envPath, content, "utf8");
 console.log(`OK: EXPO_PUBLIC_API_HOST=${trimmed}`);

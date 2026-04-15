@@ -16,6 +16,11 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as criptomonedasService from "../src/Services/criptomonedas.service";
 import { CRYPTO_DISPLAY, CRYPTO_API_TO_CODE, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
+import {
+  formatCryptoQuantityEsAR,
+  formatFiatByCurrency,
+  formatPercentValueEsAR,
+} from "../src/utils/formatNumber";
 
 interface CryptoPrice {
   tipo: string;
@@ -37,10 +42,7 @@ interface CryptoDisplay {
 }
 
 function fmtNumber(n: number, currency: string) {
-  if (currency === "ars" || currency === "jpy" || currency === "brl") {
-    return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n);
-  }
-  return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return formatFiatByCurrency(n, currency.toUpperCase());
 }
 
 export default function CriptomonedasScreen() {
@@ -168,7 +170,8 @@ export default function CriptomonedasScreen() {
                 <View style={s.chipGreen}>
                   <Ionicons name="trending-up" size={13} color="#4ADE80" />
                   <Text style={s.chipGreenText}>
-                    24h {avgTrend24h >= 0 ? "+" : ""}{avgTrend24h.toFixed(2)}%
+                    24h {avgTrend24h >= 0 ? "+" : ""}
+                    {formatPercentValueEsAR(avgTrend24h)}%
                   </Text>
                 </View>
               </View>
@@ -187,7 +190,9 @@ export default function CriptomonedasScreen() {
                     </View>
                     <View style={s.info}>
                       <Text style={s.coinName}>{c.name}</Text>
-                      <Text style={s.coinSub}>{c.holdings} {c.code}</Text>
+                      <Text style={s.coinSub}>
+                        {formatCryptoQuantityEsAR(c.holdings)} {c.code}
+                      </Text>
                     </View>
                     <View style={s.right}>
                       <Text style={s.coinValue}>
@@ -198,7 +203,8 @@ export default function CriptomonedasScreen() {
                           <>
                             <Ionicons name={up24 ? "caret-up" : "caret-down"} size={12} color={up24 ? "#4ADE80" : "#EF4444"} />
                             <Text style={[s.trendText, { color: up24 ? "#4ADE80" : "#EF4444" }]}>
-                              {up24 ? "+" : ""}{c.trend24h.toFixed(2)}%
+                              {up24 ? "+" : ""}
+                              {formatPercentValueEsAR(c.trend24h ?? 0)}%
                             </Text>
                           </>
                         ) : (
@@ -237,7 +243,8 @@ export default function CriptomonedasScreen() {
                       <View style={s.trendRow}>
                         {c.trend24h !== null ? (
                           <Text style={[s.trendText, { color: up ? "#4ADE80" : "#EF4444" }]}>
-                            24h {up ? "+" : ""}{c.trend24h.toFixed(1)}%
+                            24h {up ? "+" : ""}
+                            {formatPercentValueEsAR(c.trend24h ?? 0, 1)}%
                           </Text>
                         ) : (
                           <Text style={s.trendText}>—</Text>

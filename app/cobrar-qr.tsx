@@ -16,6 +16,7 @@ import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
 import { parseAmount } from "../src/utils/parseAmount";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
 function normalizeAmountInput(t: string): string {
   const lastPeriod = t.lastIndexOf(".");
@@ -31,10 +32,6 @@ interface Cuenta {
   alias: string;
   moneda: string;
   saldo: string;
-}
-
-function fmtArs(n: number) {
-  return new Intl.NumberFormat("es-AR").format(n);
 }
 
 export default function CobrarQRScreen() {
@@ -163,9 +160,9 @@ export default function CobrarQRScreen() {
                 />
               </View>
               <Text style={s.qrAmount}>
-                {selectedCuenta?.moneda === "ARS" ? "$" : ""}
-                {fmtArs(montoNum)}
-                {selectedCuenta?.moneda !== "ARS" ? ` ${selectedCuenta?.moneda}` : ""}
+                {selectedCuenta
+                  ? formatMoneyWithSymbol(montoNum, selectedCuenta.moneda)
+                  : ""}
               </Text>
               <Text style={s.qrAlias}>Alias: {selectedCuenta?.alias}</Text>
               <Text style={s.qrHint}>Que alguien escanee este QR para transferirte</Text>

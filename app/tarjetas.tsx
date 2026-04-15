@@ -17,6 +17,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as tarjetasService from "../src/Services/tarjetas.service";
+import { formatFiatByCurrency } from "../src/utils/formatNumber";
 
 interface Tarjeta {
   id: number;
@@ -34,10 +35,6 @@ interface Cuenta {
   alias: string;
   moneda: string;
   saldo: string;
-}
-
-function fmtArs(n: number) {
-  return new Intl.NumberFormat("es-AR").format(Math.round(n));
 }
 
 const GRADIENTS: [string, string][] = [
@@ -248,7 +245,7 @@ export default function TarjetasScreen() {
                       <View style={s.cardBottom}>
                         <View>
                           <Text style={s.cardBalLabel}>Saldo disponible</Text>
-                          <Text style={s.cardBal}>${fmtArs(saldo)}</Text>
+                          <Text style={s.cardBal}>${formatFiatByCurrency(saldo, "ARS")}</Text>
                         </View>
                       </View>
                       <Pressable
@@ -310,7 +307,7 @@ export default function TarjetasScreen() {
                   {c.moneda} · {c.alias}
                 </Text>
                 <Text style={s.modalOptionSaldo}>
-                  ${fmtArs(parseFloat(c.saldo) || 0)}
+                  ${formatFiatByCurrency(parseFloat(c.saldo) || 0, "ARS")}
                 </Text>
               </Pressable>
             ))}

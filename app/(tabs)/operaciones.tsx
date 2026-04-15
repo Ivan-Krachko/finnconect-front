@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,11 +14,20 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import * as accionesService from "../../src/Services/acciones.service";
 import * as criptomonedasService from "../../src/Services/criptomonedas.service";
 import * as cuentasService from "../../src/Services/cuentas.service";
 import * as currencyConversionsService from "../../src/Services/currency-conversions.service";
+import { STOCK_DISPLAY } from "../../src/constants/acciones";
 import { CRYPTO_DISPLAY, CRYPTO_API_MAP } from "../../src/constants/criptomonedas";
 import { parseAmount } from "../../src/utils/parseAmount";
+import {
+  formatCryptoQuantityEsAR,
+  formatDecimalEsAR,
+  formatFiatByCurrency,
+  formatPercentValueEsAR,
+  formatStockSharesEsAR,
+} from "../../src/utils/formatNumber";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type TabKey = "divisas" | "cripto" | "acciones";
@@ -43,6 +52,7 @@ interface Crypto {
 }
 
 interface Stock {
+  tipoAccion: string;
   ticker: string;
   name: string;
   letter: string;
@@ -90,54 +100,52 @@ const CRYPTOS_FALLBACK: Crypto[] = [
   { code: "ETH", name: "Ethereum", symbol: "Ξ", color: "#627EEA", priceArs: 0, trend: 0 },
 ];
 
-const STOCKS: Stock[] = [
+/** Fallback si falla GET /acciones/prices (mismos instrumentos que el backend) */
+const STOCKS_FALLBACK: Stock[] = [
   {
+    tipoAccion: "apple",
     ticker: "AAPL",
-    name: "Apple Inc.",
+    name: "Apple",
     letter: "A",
     color: "#A2AAAD",
-    priceArs: 225000,
-    trend: 0.89,
+    priceArs: 0,
+    trend: 0,
   },
   {
+    tipoAccion: "alphabet",
     ticker: "GOOGL",
-    name: "Alphabet Inc.",
+    name: "Alphabet",
     letter: "G",
     color: "#4285F4",
-    priceArs: 178000,
-    trend: 1.23,
+    priceArs: 0,
+    trend: 0,
   },
   {
-    ticker: "TSLA",
-    name: "Tesla Inc.",
-    letter: "T",
-    color: "#CC0000",
-    priceArs: 285000,
-    trend: -2.15,
-  },
-  {
+    tipoAccion: "amazon",
     ticker: "AMZN",
-    name: "Amazon.com",
+    name: "Amazon",
     letter: "A",
     color: "#FF9900",
-    priceArs: 198000,
-    trend: 0.67,
+    priceArs: 0,
+    trend: 0,
   },
   {
+    tipoAccion: "microsoft",
     ticker: "MSFT",
-    name: "Microsoft Corp.",
+    name: "Microsoft",
     letter: "M",
     color: "#00A4EF",
-    priceArs: 412000,
-    trend: 1.45,
+    priceArs: 0,
+    trend: 0,
   },
   {
+    tipoAccion: "nvidia",
     ticker: "NVDA",
-    name: "NVIDIA Corp.",
+    name: "NVIDIA",
     letter: "N",
     color: "#76B900",
-    priceArs: 890000,
-    trend: 3.78,
+    priceArs: 0,
+    trend: 0,
   },
 ];
 
@@ -149,10 +157,6 @@ const TABS: { key: TabKey; label: string; icon: IconName }[] = [
   { key: "acciones", label: "Acciones", icon: "analytics-outline" },
 ];
 
-function fmtArs(n: number): string {
-  return new Intl.NumberFormat("es-AR").format(n);
-}
-
 /** Normaliza input: si el teclado envía punto como decimal, mostramos coma (formato Argentina) */
 function normalizeAmountInput(t: string): string {
   const lastPeriod = t.lastIndexOf(".");
@@ -161,16 +165,6 @@ function normalizeAmountInput(t: string): string {
   if (after.length === 3 && /^\d{3}$/.test(after)) return t;
   return t.replace(/\./g, ",");
 }
-
-/** Formato cripto con coma como decimal (consistente con formato Argentina en la pantalla) */
-function fmtCrypto(n: number): string {
-  let s: string;
-  if (n >= 1) s = n.toFixed(4);
-  else if (n >= 0.001) s = n.toFixed(6);
-  else s = n.toFixed(8);
-  return s.replace(".", ",");
-}
-
 
 
 
@@ -248,7 +242,13 @@ export default function OperacionesScreen() {
   const [fxError, setFxError] = useState<string | null>(null);
 
   const fxNumeric = parseAmount(fxAmount);
-  const fxReceive = fxRates[fxReceiveCurrency] ?? 0;
+  const fxReceive = useMemo(() => {
+    const code = (fxReceiveCurrency || "").toUpperCase();
+    const r = fxRates;
+    if (r[code] != null) return r[code];
+    const hit = Object.entries(r).find(([k]) => k.toUpperCase() === code);
+    return hit ? hit[1] : 0;
+  }, [fxRates, fxReceiveCurrency]);
   const fxRate = fxNumeric > 0 ? fxReceive / fxNumeric : 0;
   const cuentaOrigenFx = fxCuentas.find((c) => c.moneda === fxSendCurrency);
   const cuentaDestinoFx = fxCuentas.find((c) => c.moneda === fxReceiveCurrency);
@@ -288,7 +288,16 @@ export default function OperacionesScreen() {
     setFxLoading(true);
     currencyConversionsService
       .getConvertRates(token, fxSendCurrency, fxNumeric)
-      .then((res) => setFxRates(res.rates ?? {}))
+      .then((res) => {
+        const raw = res.rates ?? {};
+        const normalized: Record<string, number> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === "number" && Number.isFinite(v)) {
+            normalized[String(k).toUpperCase()] = v;
+          }
+        }
+        setFxRates(normalized);
+      })
       .catch(() => setFxRates({}))
       .finally(() => setFxLoading(false));
   }, [token, activeTab, fxSendCurrency, fxNumeric]);
@@ -307,7 +316,7 @@ export default function OperacionesScreen() {
       setFxAmount("");
       Alert.alert(
         "Conversión exitosa",
-        `Recibís ${typeof res.montoDestino === "number" ? res.montoDestino.toLocaleString("es-AR", { maximumFractionDigits: 2 }) : res.montoDestino} ${fxReceiveCurrency}`
+        `Recibís ${typeof res.montoDestino === "number" ? formatDecimalEsAR(res.montoDestino, 2, 2) : res.montoDestino} ${fxReceiveCurrency}`
       );
     } catch (e: any) {
       setFxError(e?.message || "No se pudo completar la conversión");
@@ -324,7 +333,7 @@ export default function OperacionesScreen() {
   const activeCrypto = cryptos[Math.min(selectedCrypto, cryptos.length - 1)] ?? CRYPTOS_FALLBACK[0];
 
   useEffect(() => {
-    if (!token || activeTab !== "cripto") return;
+    if (!token || (activeTab !== "cripto" && activeTab !== "acciones")) return;
     cuentasService
       .getCuentas(token)
       .then((data) => setCuentas(data.items || []))
@@ -337,10 +346,18 @@ export default function OperacionesScreen() {
     }
   }, [cryptos.length, selectedCrypto]);
 
-  // Reset monto al cambiar moneda o modo
+  // Reset monto solo al cambiar lo que enviás: en comprar = moneda fiat; en vender = cripto elegida. Al cambiar modo, limpiar.
   useEffect(() => {
     setCryptoAmount("");
+  }, [cryptoMode]);
+
+  useEffect(() => {
+    if (cryptoMode === "comprar") setCryptoAmount("");
   }, [cryptoSendCurrency, cryptoMode]);
+
+  useEffect(() => {
+    if (cryptoMode === "vender") setCryptoAmount("");
+  }, [selectedCrypto, cryptoMode]);
 
   const cryptoNumeric = parseAmount(cryptoAmount);
   const price = activeCrypto.priceArs;
@@ -391,12 +408,168 @@ export default function OperacionesScreen() {
     }
   };
 
-  // Acciones state
+  // Acciones: precios API + holdings
+  const [stocks, setStocks] = useState<Stock[]>(STOCKS_FALLBACK);
+  const [stocksLoading, setStocksLoading] = useState(true);
+  const [stocksError, setStocksError] = useState<string | null>(null);
+  const [stockSendCurrency, setStockSendCurrency] = useState("ARS");
+  const [stockMode, setStockMode] = useState<"comprar" | "vender">("comprar");
+  const [stockHoldings, setStockHoldings] = useState<Record<string, number>>({});
+  const [stockSubmitting, setStockSubmitting] = useState(false);
   const [stockAmount, setStockAmount] = useState("");
   const [selectedStock, setSelectedStock] = useState(0);
-  const activeStock = STOCKS[selectedStock];
+
+  const fetchStockPrecios = useCallback(() => {
+    if (!token) {
+      setStocks(STOCKS_FALLBACK);
+      setStocksLoading(false);
+      return;
+    }
+    setStocksLoading(true);
+    setStocksError(null);
+    const convert = stockSendCurrency.toLowerCase();
+    accionesService
+      .getPreciosAcciones(token, convert)
+      .then(
+        (
+          data: {
+            tipo: string;
+            symbol: string;
+            name: string;
+            price: number;
+            percentChange24h: number | null;
+          }[]
+        ) => {
+          const mapped: Stock[] = data.map((c) => {
+            const display =
+              STOCK_DISPLAY[c.symbol as keyof typeof STOCK_DISPLAY] ?? {
+                letter: c.symbol.charAt(0),
+                color: "#888",
+              };
+            return {
+              tipoAccion: c.tipo,
+              ticker: c.symbol,
+              name: c.name,
+              letter: display.letter,
+              color: display.color,
+              priceArs: c.price,
+              trend: c.percentChange24h ?? 0,
+            };
+          });
+          setStocks(mapped.length > 0 ? mapped : STOCKS_FALLBACK);
+        }
+      )
+      .catch((err) => {
+        setStocksError(err?.message || "Error al cargar precios");
+        setStocks(STOCKS_FALLBACK);
+      })
+      .finally(() => setStocksLoading(false));
+  }, [token, stockSendCurrency]);
+
+  const fetchStockHoldings = useCallback(() => {
+    if (!token) return;
+    accionesService
+      .getAcciones(token)
+      .then((data) => {
+        const map: Record<string, number> = {};
+        for (const item of data.items) {
+          const t = item.tipoAccion as string;
+          if (t) map[t] = parseFloat(item.monto) || 0;
+        }
+        setStockHoldings(map);
+      })
+      .catch(() => setStockHoldings({}));
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab !== "acciones" || !token) return;
+      fetchStockPrecios();
+      fetchStockHoldings();
+    }, [activeTab, token, fetchStockPrecios, fetchStockHoldings])
+  );
+
+  useEffect(() => {
+    if (activeTab !== "acciones" || !token) return;
+    fetchStockPrecios();
+  }, [stockSendCurrency, activeTab, token, fetchStockPrecios]);
+
+  const activeStock =
+    stocks[Math.min(selectedStock, Math.max(0, stocks.length - 1))] ?? STOCKS_FALLBACK[0];
   const stockNumeric = parseAmount(stockAmount);
-  const stockShares = stockNumeric / activeStock.priceArs;
+  const priceStock = activeStock.priceArs;
+  const stockShares =
+    stockMode === "comprar" && priceStock > 0 ? stockNumeric / priceStock : stockNumeric;
+  const stockReceiveFiat =
+    stockMode === "vender" && priceStock > 0 ? stockNumeric * priceStock : 0;
+
+  useEffect(() => {
+    if (selectedStock >= stocks.length && stocks.length > 0) {
+      setSelectedStock(0);
+    }
+  }, [stocks.length, selectedStock]);
+
+  useEffect(() => {
+    setStockAmount("");
+  }, [stockMode]);
+
+  useEffect(() => {
+    if (stockMode === "comprar") setStockAmount("");
+  }, [stockSendCurrency, stockMode]);
+
+  useEffect(() => {
+    if (stockMode === "vender") setStockAmount("");
+  }, [selectedStock, stockMode]);
+
+  const cuentaStock = cuentas.find((c) => c.moneda === stockSendCurrency) ?? cuentas[0];
+  const saldoStock = cuentaStock ? parseFloat(String(cuentaStock.saldo)) || 0 : 0;
+  const titulosDisponibles = stockHoldings[activeStock.tipoAccion] ?? 0;
+
+  const cantidadTitulosApi =
+    stockMode === "comprar"
+      ? stockShares
+      : stockNumeric;
+
+  const canConfirmStock =
+    token &&
+    cuentaStock &&
+    activeStock.tipoAccion &&
+    priceStock > 0 &&
+    cantidadTitulosApi > 0 &&
+    (stockMode === "comprar"
+      ? saldoStock >= stockNumeric
+      : titulosDisponibles >= stockNumeric);
+
+  const handleStockConfirm = async () => {
+    if (!token || !cuentaStock || !activeStock.tipoAccion || stockSubmitting) return;
+    if (!canConfirmStock) return;
+    const sentido = stockMode === "comprar" ? "egreso" : "ingreso";
+    const qty = cantidadTitulosApi;
+    if (qty <= 0) return;
+
+    setStockSubmitting(true);
+    try {
+      const qtyStr =
+        qty < 1e-6 ? qty.toFixed(8) : qty < 1 ? qty.toFixed(6) : String(Number(qty.toFixed(6)));
+      await accionesService.crearTransaccionAccion(
+        token,
+        cuentaStock.id,
+        activeStock.tipoAccion,
+        sentido,
+        qtyStr
+      );
+      setStockAmount("");
+      await fetchStockHoldings();
+      Alert.alert(
+        "Operación exitosa",
+        `${stockMode === "comprar" ? "Compra" : "Venta"} de ${activeStock.ticker} realizada correctamente.`
+      );
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "No se pudo completar la operación");
+    } finally {
+      setStockSubmitting(false);
+    }
+  };
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -405,13 +578,6 @@ export default function OperacionesScreen() {
         <View style={{ width: 68 }} />
         <Text style={s.headerTitle}>Operaciones</Text>
         <View style={s.headerRight}>
-          <Pressable hitSlop={8}>
-            <Ionicons
-              name="notifications-outline"
-              size={22}
-              color="rgba(255,255,255,0.8)"
-            />
-          </Pressable>
           <View style={s.avatar}>
             <Ionicons name="person" size={14} color="#0B3D2E" />
           </View>
@@ -470,6 +636,9 @@ export default function OperacionesScreen() {
                         key={c.id}
                         style={[s.currencyChip, active && s.currencyChipActive]}
                         onPress={() => {
+                          if (c.moneda !== fxSendCurrency) {
+                            setFxAmount("");
+                          }
                           setFxSendCurrency(c.moneda);
                           if (c.moneda === fxReceiveCurrency) {
                             const otra = fxCuentas.find((x) => x.moneda !== c.moneda);
@@ -491,16 +660,18 @@ export default function OperacionesScreen() {
 
               <View style={s.section}>
                 <Text style={s.label}>Tú Envías</Text>
-                <View style={s.row}>
-                  <View style={s.rowLeft}>
+                <View style={[s.row, s.fxAmountRow]}>
+                  <View style={[s.rowLeft, s.fxRowLeft]}>
                     <View style={[s.circle, { backgroundColor: "#15332A" }]}>
                       <Text style={s.emoji}>
                         {CURRENCIES.find((x) => x.code === fxSendCurrency)?.flag ?? "💱"}
                       </Text>
                     </View>
-                    <View>
-                      <Text style={s.code}>{fxSendCurrency}</Text>
-                      <Text style={s.sub}>
+                    <View style={s.fxCurrencyMeta}>
+                      <Text style={s.code} numberOfLines={1}>
+                        {fxSendCurrency}
+                      </Text>
+                      <Text style={s.sub} numberOfLines={2}>
                         {CURRENCIES.find((x) => x.code === fxSendCurrency)?.name ?? fxSendCurrency}
                       </Text>
                     </View>
@@ -511,6 +682,7 @@ export default function OperacionesScreen() {
                       value={fxAmount}
                       onChangeText={(t) => setFxAmount(normalizeAmountInput(t))}
                       keyboardType="numeric"
+                      placeholder="0"
                       placeholderTextColor="rgba(255,255,255,0.25)"
                     />
                   </View>
@@ -551,16 +723,18 @@ export default function OperacionesScreen() {
 
               <View style={s.section}>
                 <Text style={s.label}>Tú Recibes</Text>
-                <View style={s.row}>
-                  <View style={s.rowLeft}>
+                <View style={[s.row, s.fxAmountRow]}>
+                  <View style={[s.rowLeft, s.fxRowLeft]}>
                     <View style={[s.circle, { backgroundColor: "#152533" }]}>
                       <Text style={s.emoji}>
                         {CURRENCIES.find((x) => x.code === fxReceiveCurrency)?.flag ?? "💱"}
                       </Text>
                     </View>
-                    <View>
-                      <Text style={s.code}>{fxReceiveCurrency}</Text>
-                      <Text style={s.sub}>
+                    <View style={s.fxCurrencyMeta}>
+                      <Text style={s.code} numberOfLines={1}>
+                        {fxReceiveCurrency}
+                      </Text>
+                      <Text style={s.sub} numberOfLines={2}>
                         {CURRENCIES.find((x) => x.code === fxReceiveCurrency)?.name ?? fxReceiveCurrency}
                       </Text>
                     </View>
@@ -569,10 +743,8 @@ export default function OperacionesScreen() {
                     {fxLoading ? (
                       <ActivityIndicator size="small" color="#1FA774" />
                     ) : (
-                      <Text style={s.amountValue}>
-                        {(fxReceiveCurrency === "ARS" || fxReceiveCurrency === "JPY" || fxReceiveCurrency === "BRL")
-                          ? fmtArs(Math.round(fxReceive))
-                          : fxReceive.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <Text style={s.amountValue} numberOfLines={1} adjustsFontSizeToFit>
+                        {formatFiatByCurrency(fxReceive, fxReceiveCurrency)}
                       </Text>
                     )}
                   </View>
@@ -583,7 +755,7 @@ export default function OperacionesScreen() {
                 <Text style={s.rateText}>
                   Tasa:{" "}
                   <Text style={s.rateHl}>
-                    1 {fxSendCurrency} = {(fxReceiveCurrency === "ARS" || fxReceiveCurrency === "JPY" || fxReceiveCurrency === "BRL") ? fmtArs(Math.round(fxRate)) : fxRate.toFixed(4)} {fxReceiveCurrency}
+                    1 {fxSendCurrency} = {formatFiatByCurrency(fxRate, fxReceiveCurrency)} {fxReceiveCurrency}
                   </Text>
                 </Text>
               )}
@@ -634,7 +806,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridCode}>{c.code}</Text>
                     <Text style={s.gridName}>{c.name}</Text>
                     <View style={s.gridBottom}>
-                      <Text style={s.gridPrice}>{fmtArs(c.rateToArs)} ARS</Text>
+                      <Text style={s.gridPrice}>{formatFiatByCurrency(c.rateToArs, "ARS")} ARS</Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
                   </View>
@@ -765,7 +937,7 @@ export default function OperacionesScreen() {
 
               <View style={s.section}>
                 <Text style={s.label}>Tú Invertís</Text>
-                <View style={s.row}>
+                <View style={s.amountBlock}>
                   {cryptoMode === "comprar" ? (
                     <>
                       <View style={s.rowLeft}>
@@ -774,22 +946,20 @@ export default function OperacionesScreen() {
                             {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.flag ?? "🇦🇷"}
                           </Text>
                         </View>
-                        <View>
+                        <View style={s.currencyTextCol}>
                           <Text style={s.code}>{cryptoSendCurrency}</Text>
                           <Text style={s.sub}>
                             {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.name ?? "Peso Argentino"}
                           </Text>
                         </View>
                       </View>
-                      <View style={s.amountBox}>
-                        <TextInput
-                          style={s.amountInput}
-                          value={cryptoAmount}
-                          onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
-                          keyboardType="decimal-pad"
-                          placeholderTextColor="rgba(255,255,255,0.25)"
-                        />
-                      </View>
+                      <TextInput
+                        style={s.amountInputBlock}
+                        value={cryptoAmount}
+                        onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
+                        keyboardType="decimal-pad"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                      />
                     </>
                   ) : (
                     <>
@@ -799,20 +969,18 @@ export default function OperacionesScreen() {
                             {activeCrypto.symbol}
                           </Text>
                         </View>
-                        <View>
+                        <View style={s.currencyTextCol}>
                           <Text style={s.code}>{activeCrypto.code}</Text>
                           <Text style={s.sub}>{activeCrypto.name}</Text>
                         </View>
                       </View>
-                      <View style={s.amountBox}>
-                        <TextInput
-                          style={s.amountInput}
-                          value={cryptoAmount}
-                          onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
-                          keyboardType="decimal-pad"
-                          placeholderTextColor="rgba(255,255,255,0.25)"
-                        />
-                      </View>
+                      <TextInput
+                        style={s.amountInputBlock}
+                        value={cryptoAmount}
+                        onChangeText={(t) => setCryptoAmount(normalizeAmountInput(t))}
+                        keyboardType="decimal-pad"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                      />
                     </>
                   )}
                 </View>
@@ -822,7 +990,7 @@ export default function OperacionesScreen() {
 
               <View style={s.section}>
                 <Text style={s.label}>Tú Recibes</Text>
-                <View style={s.row}>
+                <View style={s.amountBlock}>
                   {cryptoMode === "comprar" ? (
                     <>
                       <View style={s.rowLeft}>
@@ -831,12 +999,12 @@ export default function OperacionesScreen() {
                             {activeCrypto.symbol}
                           </Text>
                         </View>
-                        <View>
+                        <View style={s.currencyTextCol}>
                           <Text style={s.code}>{activeCrypto.code}</Text>
                           <Text style={s.sub}>{activeCrypto.name}</Text>
                         </View>
                       </View>
-                      <Text style={s.amountValue}>{fmtCrypto(cryptoReceive)}</Text>
+                      <Text style={s.amountValueBlock}>{formatCryptoQuantityEsAR(cryptoReceive)}</Text>
                     </>
                   ) : (
                     <>
@@ -846,18 +1014,15 @@ export default function OperacionesScreen() {
                             {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.flag ?? "🇦🇷"}
                           </Text>
                         </View>
-                        <View>
+                        <View style={s.currencyTextCol}>
                           <Text style={s.code}>{cryptoSendCurrency}</Text>
                           <Text style={s.sub}>
                             {CURRENCIES.find((c) => c.code === cryptoSendCurrency)?.name ?? "Peso Argentino"}
                           </Text>
                         </View>
                       </View>
-                      <Text style={s.amountValue}>
-                        {(cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL")
-                          ? fmtArs(Math.round(cryptoReceive))
-                          : cryptoReceive.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                        {cryptoSendCurrency}
+                      <Text style={s.amountValueBlock}>
+                        {formatFiatByCurrency(cryptoReceive, cryptoSendCurrency)} {cryptoSendCurrency}
                       </Text>
                     </>
                   )}
@@ -867,7 +1032,7 @@ export default function OperacionesScreen() {
               <Text style={s.rateText}>
                 Precio:{" "}
                 <Text style={s.rateHl}>
-                  1 {activeCrypto.code} = {(cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL") ? fmtArs(Math.round(price)) : price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cryptoSendCurrency}
+                  1 {activeCrypto.code} = {formatFiatByCurrency(price, cryptoSendCurrency)} {cryptoSendCurrency}
                 </Text>
               </Text>
 
@@ -895,7 +1060,6 @@ export default function OperacionesScreen() {
             <Text style={s.heading}>Criptomonedas Populares</Text>
             <View style={s.grid}>
               {cryptos.map((c) => {
-                const up = c.trend >= 0;
                 return (
                   <View key={c.code} style={s.gridCard}>
                     <View style={s.gridTop}>
@@ -915,10 +1079,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridName}>{c.name}</Text>
                     <View style={s.gridBottom}>
                       <Text style={s.gridPrice}>
-                        {cryptoSendCurrency === "ARS" || cryptoSendCurrency === "JPY" || cryptoSendCurrency === "BRL"
-                          ? fmtArs(Math.round(c.priceArs))
-                          : c.priceArs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                        {cryptoSendCurrency}
+                        {formatFiatByCurrency(c.priceArs, cryptoSendCurrency)} {cryptoSendCurrency}
                       </Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
@@ -933,19 +1094,55 @@ export default function OperacionesScreen() {
         {activeTab === "acciones" && (
           <>
             <View style={s.card}>
-              <Text style={s.cardTitle}>Comprar Acciones</Text>
-              <Text style={s.cardSub}>
-                Invertí en las principales empresas del mundo.
-              </Text>
+              <View style={s.cardTitleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.cardTitle}>Acciones</Text>
+                  <Text style={s.cardSub}>
+                    Cotización vía API; comprá o vendé títulos debitando una cuenta en la moneda elegida.
+                  </Text>
+                </View>
+                {stocksLoading && (
+                  <ActivityIndicator size="small" color="#1FA774" style={{ marginTop: 4 }} />
+                )}
+              </View>
+              {stocksError ? <Text style={s.cryptoErrorText}>{stocksError}</Text> : null}
 
-              {/* Stock selector chips */}
+              <View style={s.modeToggleRow}>
+                <Pressable
+                  style={[s.modeToggleBtn, stockMode === "comprar" && s.modeToggleBtnActive]}
+                  onPress={() => setStockMode("comprar")}
+                >
+                  <Ionicons
+                    name="trending-up"
+                    size={18}
+                    color={stockMode === "comprar" ? "#1FA774" : "rgba(255,255,255,0.35)"}
+                  />
+                  <Text style={[s.modeToggleText, stockMode === "comprar" && s.modeToggleTextActive]}>
+                    Comprar
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[s.modeToggleBtn, stockMode === "vender" && s.modeToggleBtnActive]}
+                  onPress={() => setStockMode("vender")}
+                >
+                  <Ionicons
+                    name="trending-down"
+                    size={18}
+                    color={stockMode === "vender" ? "#EF4444" : "rgba(255,255,255,0.35)"}
+                  />
+                  <Text style={[s.modeToggleText, stockMode === "vender" && s.modeToggleTextActive]}>
+                    Vender
+                  </Text>
+                </Pressable>
+              </View>
+
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={s.chipScroll}
                 contentContainerStyle={s.chipRow}
               >
-                {STOCKS.map((st, i) => (
+                {stocks.map((st, i) => (
                   <Pressable
                     key={st.ticker}
                     style={[
@@ -957,16 +1154,11 @@ export default function OperacionesScreen() {
                     ]}
                     onPress={() => setSelectedStock(i)}
                   >
-                    <View
-                      style={[s.chipDot, { backgroundColor: st.color }]}
-                    >
+                    <View style={[s.chipDot, { backgroundColor: st.color }]}>
                       <Text style={s.chipSymbol}>{st.letter}</Text>
                     </View>
                     <Text
-                      style={[
-                        s.chipLabel,
-                        selectedStock === i && { color: "#fff" },
-                      ]}
+                      style={[s.chipLabel, selectedStock === i && { color: "#fff" }]}
                     >
                       {st.ticker}
                     </Text>
@@ -975,102 +1167,175 @@ export default function OperacionesScreen() {
               </ScrollView>
 
               <View style={s.section}>
-                <Text style={s.label}>Tú Invertís</Text>
-                <View style={s.row}>
-                  <View style={s.rowLeft}>
-                    <View style={[s.circle, { backgroundColor: "#15332A" }]}>
-                      <Text style={s.emoji}>🇦🇷</Text>
-                    </View>
-                    <View>
-                      <Text style={s.code}>ARS</Text>
-                      <Text style={s.sub}>Peso Argentino</Text>
-                    </View>
-                  </View>
-                  <View style={s.amountBox}>
-                    <TextInput
-                      style={s.amountInput}
-                      value={stockAmount}
-                      onChangeText={(t) => setStockAmount(normalizeAmountInput(t))}
-                      keyboardType="numeric"
-                      placeholderTextColor="rgba(255,255,255,0.25)"
-                    />
-                  </View>
+                <Text style={s.label}>Cuenta / moneda</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={s.currencyChipScroll}
+                  contentContainerStyle={s.currencyChipRow}
+                >
+                  {CURRENCIES.map((curr) => {
+                    const active = stockSendCurrency === curr.code;
+                    return (
+                      <Pressable
+                        key={curr.code}
+                        style={[s.currencyChip, active && s.currencyChipActive]}
+                        onPress={() => setStockSendCurrency(curr.code)}
+                      >
+                        <Text style={s.currencyChipFlag}>{curr.flag}</Text>
+                        <Text style={[s.currencyChipCode, active && s.currencyChipCodeActive]}>
+                          {curr.code}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {stockMode === "vender" ? (
+                <Text style={[s.rateText, { marginTop: 0, marginBottom: 12 }]}>
+                  Títulos disponibles ({activeStock.ticker}):{" "}
+                  <Text style={s.rateHl}>{formatStockSharesEsAR(titulosDisponibles)}</Text>
+                </Text>
+              ) : null}
+
+              <View style={s.section}>
+                <Text style={s.label}>{stockMode === "comprar" ? "Tú Invertís" : "Cantidad de títulos"}</Text>
+                <View style={s.amountBlock}>
+                  {stockMode === "comprar" ? (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: "#15332A" }]}>
+                          <Text style={s.emoji}>
+                            {CURRENCIES.find((c) => c.code === stockSendCurrency)?.flag ?? "🇦🇷"}
+                          </Text>
+                        </View>
+                        <View style={s.currencyTextCol}>
+                          <Text style={s.code}>{stockSendCurrency}</Text>
+                          <Text style={s.sub}>
+                            {CURRENCIES.find((c) => c.code === stockSendCurrency)?.name ?? "Moneda"}
+                          </Text>
+                        </View>
+                      </View>
+                      <TextInput
+                        style={s.amountInputBlock}
+                        value={stockAmount}
+                        onChangeText={(t) => setStockAmount(normalizeAmountInput(t))}
+                        keyboardType="decimal-pad"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: `${activeStock.color}20` }]}>
+                          <Text style={[s.symbolText, { color: activeStock.color }]}>
+                            {activeStock.letter}
+                          </Text>
+                        </View>
+                        <View style={s.currencyTextCol}>
+                          <Text style={s.code}>{activeStock.ticker}</Text>
+                          <Text style={s.sub}>{activeStock.name}</Text>
+                        </View>
+                      </View>
+                      <TextInput
+                        style={s.amountInputBlock}
+                        value={stockAmount}
+                        onChangeText={(t) => setStockAmount(normalizeAmountInput(t))}
+                        keyboardType="decimal-pad"
+                        placeholderTextColor="rgba(255,255,255,0.25)"
+                      />
+                    </>
+                  )}
                 </View>
               </View>
 
               <View style={s.divider} />
 
               <View style={s.section}>
-                <Text style={s.label}>Cantidad Estimada</Text>
-                <View style={s.row}>
-                  <View style={s.rowLeft}>
-                    <View
-                      style={[
-                        s.circle,
-                        { backgroundColor: `${activeStock.color}20` },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          s.symbolText,
-                          { color: activeStock.color, fontWeight: "800" },
-                        ]}
-                      >
-                        {activeStock.letter}
+                <Text style={s.label}>
+                  {stockMode === "comprar" ? "Recibís (títulos)" : "Recibís (moneda)"}
+                </Text>
+                <View style={s.amountBlock}>
+                  {stockMode === "comprar" ? (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: `${activeStock.color}20` }]}>
+                          <Text style={[s.symbolText, { color: activeStock.color }]}>
+                            {activeStock.letter}
+                          </Text>
+                        </View>
+                        <View style={s.currencyTextCol}>
+                          <Text style={s.code}>{activeStock.ticker}</Text>
+                          <Text style={s.sub}>{activeStock.name}</Text>
+                        </View>
+                      </View>
+                      <Text style={s.amountValueBlock}>
+                        {formatStockSharesEsAR(stockShares)} títulos
                       </Text>
-                    </View>
-                    <View>
-                      <Text style={s.code}>{activeStock.ticker}</Text>
-                      <Text style={s.sub}>{activeStock.name}</Text>
-                    </View>
-                  </View>
-                  <Text style={s.amountValue}>
-                    {stockShares.toFixed(2)} acc.
-                  </Text>
+                    </>
+                  ) : (
+                    <>
+                      <View style={s.rowLeft}>
+                        <View style={[s.circle, { backgroundColor: "#15332A" }]}>
+                          <Text style={s.emoji}>
+                            {CURRENCIES.find((c) => c.code === stockSendCurrency)?.flag ?? "🇦🇷"}
+                          </Text>
+                        </View>
+                        <View style={s.currencyTextCol}>
+                          <Text style={s.code}>{stockSendCurrency}</Text>
+                          <Text style={s.sub}>
+                            {CURRENCIES.find((c) => c.code === stockSendCurrency)?.name ?? "Moneda"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={s.amountValueBlock}>
+                        {formatFiatByCurrency(stockReceiveFiat, stockSendCurrency)} {stockSendCurrency}
+                      </Text>
+                    </>
+                  )}
                 </View>
               </View>
 
               <Text style={s.rateText}>
-                Precio por acción:{" "}
+                Precio:{" "}
                 <Text style={s.rateHl}>
-                  1 {activeStock.ticker} = {fmtArs(activeStock.priceArs)} ARS
+                  1 {activeStock.ticker} ={" "}
+                  {formatFiatByCurrency(priceStock, stockSendCurrency)} {stockSendCurrency}
                 </Text>
               </Text>
 
               <View style={s.btnRow}>
                 <Pressable
-                  style={({ pressed }) => [s.btnGreen, pressed && s.pressed]}
+                  style={({ pressed }) => [
+                    stockMode === "comprar" ? s.btnGreen : s.btnRed,
+                    pressed && s.pressed,
+                    (!canConfirmStock || stockSubmitting) && s.btnDisabled,
+                  ]}
+                  onPress={handleStockConfirm}
+                  disabled={!canConfirmStock || stockSubmitting}
                 >
-                  <Text style={s.btnTxt}>Comprar {activeStock.ticker}</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.btnRed, pressed && s.pressed]}
-                >
-                  <Text style={s.btnTxt}>Vender {activeStock.ticker}</Text>
+                  {stockSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={s.btnTxt}>
+                      {stockMode === "comprar" ? "Comprar" : "Vender"} {activeStock.ticker}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             </View>
 
-            <Text style={s.heading}>Acciones Populares</Text>
+            <Text style={s.heading}>Mercado</Text>
             <View style={s.grid}>
-              {STOCKS.map((st) => {
-                const up = st.trend >= 0;
+              {stocks.map((st) => {
                 return (
                   <View key={st.ticker} style={s.gridCard}>
                     <View style={s.gridTop}>
                       <View
-                        style={[
-                          s.gridIcon,
-                          { backgroundColor: `${st.color}20` },
-                        ]}
+                        style={[s.gridIcon, { backgroundColor: `${st.color}20` }]}
                       >
-                        <Text
-                          style={{
-                            fontSize: 15,
-                            fontWeight: "800",
-                            color: st.color,
-                          }}
-                        >
+                        <Text style={{ fontSize: 15, fontWeight: "800", color: st.color }}>
                           {st.letter}
                         </Text>
                       </View>
@@ -1080,7 +1345,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridName}>{st.name}</Text>
                     <View style={s.gridBottom}>
                       <Text style={s.gridPrice}>
-                        {fmtArs(st.priceArs)} ARS
+                        {formatFiatByCurrency(st.priceArs, stockSendCurrency)} {stockSendCurrency}
                       </Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
@@ -1117,7 +1382,7 @@ function TrendPill({ value }: { value: number }) {
       />
       <Text style={[s.trendTxt, { color: up ? "#4ADE80" : "#EF4444" }]}>
         {up ? "+" : ""}
-        {value.toFixed(2)}%
+        {formatPercentValueEsAR(value)}%
       </Text>
     </View>
   );
@@ -1302,6 +1567,38 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   rowLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  /** Fila compacta solo en Divisas: moneda a la izquierda, monto a la derecha */
+  fxAmountRow: {
+    alignItems: "center",
+    gap: 8,
+  },
+  fxRowLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  fxCurrencyMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  currencyTextCol: { flex: 1, minWidth: 0 },
+  amountBlock: { gap: 12 },
+  amountInputBlock: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    textAlign: "right",
+    width: "100%",
+    paddingVertical: 6,
+    paddingHorizontal: 0,
+  },
+  amountValueBlock: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    textAlign: "right",
+    width: "100%",
+    paddingVertical: 6,
+  },
   circle: {
     width: 44,
     height: 44,
@@ -1314,16 +1611,29 @@ const s = StyleSheet.create({
   code: { color: "#fff", fontSize: 17, fontWeight: "700" },
   sub: { color: DIM, fontSize: 11, marginTop: 2, lineHeight: 14 },
 
-  amountBox: { flexDirection: "row", alignItems: "center", gap: 6 },
+  amountBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    flexShrink: 0,
+    maxWidth: "46%",
+  },
   amountInput: {
     color: "#fff",
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "700",
     textAlign: "right",
-    minWidth: 80,
+    minWidth: 96,
+    maxWidth: 200,
     padding: 0,
   },
-  amountValue: { color: "#fff", fontSize: 24, fontWeight: "700" },
+  amountValue: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "right",
+  },
 
   divider: { height: 1, backgroundColor: BORDER, marginVertical: 12 },
 

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
+import { formatFiatByCurrency, formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
 interface Account {
   id: string;
@@ -63,8 +64,7 @@ const RECENT_ACTIVITY = [
 ];
 
 function fmtMoney(n: number, currency: string) {
-  const prefix = currency === "USD" ? "US$" : currency === "EUR" ? "€" : "$";
-  return `${prefix}${new Intl.NumberFormat("es-AR").format(n)}`;
+  return formatMoneyWithSymbol(n, currency);
 }
 
 export default function CuentasScreen() {
@@ -130,7 +130,9 @@ export default function CuentasScreen() {
         {/* Total */}
         <View style={s.totalCard}>
           <Text style={s.totalLabel}>Saldo Principal (ARS)</Text>
-          <Text style={s.totalValue}>${new Intl.NumberFormat("es-AR").format(Math.round(saldoPrincipal))}</Text>
+          <Text style={s.totalValue}>
+            {formatMoneyWithSymbol(saldoPrincipal, "ARS")}
+          </Text>
           <Text style={s.totalSub}>{accounts.length} cuentas activas</Text>
         </View>
 
@@ -189,7 +191,8 @@ export default function CuentasScreen() {
                   <Text style={s.actMeta}>{a.account} · {a.date}</Text>
                 </View>
                 <Text style={[s.actAmount, { color: isIn ? "#4ADE80" : "#EF4444" }]}>
-                  {isIn ? "+" : "-"}${new Intl.NumberFormat("es-AR").format(Math.abs(a.amount))}
+                  {isIn ? "+" : "-"}$
+                  {formatFiatByCurrency(Math.abs(a.amount), "ARS")}
                 </Text>
               </View>
             );

@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useContext, useState } from "react";
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,8 +12,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import { formatFiatByCurrency, formatMoneyWithSymbol } from "../../src/utils/formatNumber";
 import * as cuentasService from "../../src/Services/cuentas.service";
 import * as movimientosService from "../../src/Services/movimientos.service";
+import { getMe } from "../../src/Services/usuarios.service";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -75,9 +76,8 @@ const ACTION_ICON_COLORS: Record<string, string> = {
 };
 
 function formatCurrency(amount: number): string {
-  const abs = Math.abs(amount);
-  const formatted = new Intl.NumberFormat("es-AR").format(abs);
-  return `${amount < 0 ? "-" : "+"}$${formatted}`;
+  const sign = amount < 0 ? "-" : "+";
+  return `${sign}${formatMoneyWithSymbol(Math.abs(amount), "ARS")}`;
 }
 
 export default function Home() {
@@ -89,6 +89,7 @@ export default function Home() {
   const [movimientos, setMovimientos] = useState<
     { id: number; label: string; amount: number; date: string }[]
   >([]);
+  const [nombreUsuario, setNombreUsuario] = useState<string | null>(null);
 
   const fetchSaldo = useCallback(() => {
     if (!token) return;
@@ -120,17 +121,26 @@ export default function Home() {
       .catch(() => setMovimientos([]));
   }, [token]);
 
+  const fetchPerfil = useCallback(() => {
+    if (!token) return;
+    getMe(token)
+      .then((u: { nombre?: string; apellido?: string }) => {
+        const n = [u.nombre, u.apellido].filter(Boolean).join(" ").trim();
+        setNombreUsuario(n || null);
+      })
+      .catch(() => setNombreUsuario(null));
+  }, [token]);
+
   useFocusEffect(
     useCallback(() => {
       fetchSaldo();
       fetchMovimientos();
-    }, [fetchSaldo, fetchMovimientos])
+      fetchPerfil();
+    }, [fetchSaldo, fetchMovimientos, fetchPerfil])
   );
 
   const displayBalance =
-    saldoPrincipal !== null
-      ? new Intl.NumberFormat("es-AR").format(Math.round(saldoPrincipal))
-      : "—";
+    saldoPrincipal !== null ? formatFiatByCurrency(saldoPrincipal, "ARS") : "—";
 
   return (
     <View style={s.container}>
@@ -158,14 +168,6 @@ export default function Home() {
             <Text style={s.brandText}>FinConnect</Text>
           </View>
           <View style={s.headerRight}>
-            <Pressable style={s.headerIconBtn} hitSlop={8}>
-              <Ionicons
-                name="notifications-outline"
-                size={22}
-                color="rgba(255,255,255,0.9)"
-              />
-              <View style={s.badge} />
-            </Pressable>
             <Pressable style={s.avatar}>
               <Ionicons name="person" size={16} color="#1FA774" />
             </Pressable>
@@ -173,7 +175,9 @@ export default function Home() {
         </View>
 
         {/* ── Greeting ── */}
-        <Text style={s.greeting}>Hola, Usuario</Text>
+        <Text style={s.greeting}>
+          {nombreUsuario ? `Hola, ${nombreUsuario}` : "Hola"}
+        </Text>
 
         {/* ── Balance Card ── */}
         <View style={s.balanceCard}>
@@ -198,13 +202,6 @@ export default function Home() {
             {showBalance && saldoPrincipal !== null && <Text style={s.balanceCents}>.00</Text>}
           </View>
 
-          <View style={s.trendRow}>
-            <View style={s.trendPill}>
-              <Ionicons name="trending-up" size={13} color="#4ADE80" />
-              <Text style={s.trendValue}>+12.5%</Text>
-            </View>
-            <Text style={s.trendCaption}>vs. mes anterior</Text>
-          </View>
         </View>
 
         {/* ── Content Sheet ── */}
@@ -323,18 +320,6 @@ const s = StyleSheet.create({
     letterSpacing: 0.3,
   },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
-  headerIconBtn: { position: "relative" },
-  badge: {
-    position: "absolute",
-    top: -1,
-    right: -1,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "#FF5252",
-    borderWidth: 2,
-    borderColor: "#080E0B",
-  },
   avatar: {
     width: 36,
     height: 36,
@@ -388,23 +373,6 @@ const s = StyleSheet.create({
     fontSize: 20,
     fontWeight: "600",
   },
-  trendRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 14,
-    gap: 8,
-  },
-  trendPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(74,222,128,0.12)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    gap: 4,
-  },
-  trendValue: { color: "#4ADE80", fontSize: 13, fontWeight: "700" },
-  trendCaption: { color: "rgba(255,255,255,0.35)", fontSize: 12 },
 
   // ── Content Sheet ──
   sheet: {

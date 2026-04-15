@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useCallback, useContext, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -8,10 +9,28 @@ import {
   Text,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
+import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import * as cuentasService from "../../src/Services/cuentas.service";
+import * as criptomonedasService from "../../src/Services/criptomonedas.service";
+import * as accionesService from "../../src/Services/acciones.service";
+import { getConvertRates } from "../../src/Services/currency-conversions.service";
+import {
+  CRYPTO_DISPLAY,
+  CRYPTO_API_TO_CODE,
+} from "../../src/constants/criptomonedas";
+import { STOCK_DISPLAY, TIPO_ACCION_TO_SYMBOL } from "../../src/constants/acciones";
+import {
+  formatArsPesoEsAR,
+  formatCryptoQuantityEsAR,
+  formatEsAR,
+  formatPercentValueEsAR,
+  formatStockSharesEsAR,
+} from "../../src/utils/formatNumber";
 
-/* ── Data ── */
+/* ── Types ── */
 
 interface AllocationSlice {
   label: string;
@@ -19,7 +38,7 @@ interface AllocationSlice {
   color: string;
 }
 
-interface Asset {
+interface AssetRow {
   id: string;
   name: string;
   type: string;
@@ -27,57 +46,9 @@ interface Asset {
   trend: number | null;
   symbol: string;
   color: string;
+  valueArs: number;
+  category: "fiat" | "cripto" | "acciones";
 }
-
-const ALLOCATION: AllocationSlice[] = [
-  { label: "Cripto", percentage: 41, color: "#1FA774" },
-  { label: "Acciones", percentage: 20, color: "#3B82F6" },
-  { label: "Tarjetas", percentage: 11, color: "#F59E0B" },
-  { label: "Monedas", percentage: 28, color: "#8B5CF6" },
-];
-
-const ASSETS: Asset[] = [
-  {
-    id: "eur",
-    name: "Euro",
-    type: "Moneda",
-    amount: "€1,500.00",
-    trend: 0.5,
-    symbol: "€",
-    color: "#3B82F6",
-  },
-  {
-    id: "btc",
-    name: "Bitcoin",
-    type: "Criptomoneda",
-    amount: "0.05 BTC",
-    trend: -2.1,
-    symbol: "₿",
-    color: "#F7931A",
-  },
-  {
-    id: "tsla",
-    name: "Tesla Inc.",
-    type: "Acciones",
-    amount: "$850.50",
-    trend: 1.8,
-    symbol: "T",
-    color: "#CC0000",
-  },
-  {
-    id: "card",
-    name: "Tarjeta Débito Virtual",
-    type: "Tarjeta",
-    amount: "$250.00",
-    trend: null,
-    symbol: "💳",
-    color: "#8B5CF6",
-  },
-];
-
-const TOTAL_VALUE = 12345.67;
-const DAILY_CHANGE = 123.45;
-const DAILY_PERCENT = 1.01;
 
 /* ── Donut Chart ── */
 
@@ -129,26 +100,227 @@ function DonutChart({
   );
 }
 
+const COLORS = {
+  fiat: "#8B5CF6",
+  cripto: "#1FA774",
+  acciones: "#3B82F6",
+  otro: "#6B7280",
+};
+
+/** Convierte saldo de cuenta a ARS aproximado (tasas desde API). */
+async function cuentasSaldoToArs(
+  token: string,
+  moneda: string,
+  saldo: string
+): Promise<number> {
+  const n = parseFloat(saldo) || 0;
+  const m = (moneda || "ARS").toUpperCase();
+  if (m === "ARS") return n;
+  try {
+    const res = await getConvertRates(token, m, n);
+    const ars = res?.rates?.ARS;
+    if (typeof ars === "number" && !Number.isNaN(ars)) return ars;
+  } catch {
+    /* fallback */
+  }
+  if (m === "USD") return n * 1000;
+  if (m === "EUR") return n * 1100;
+  return n;
+}
+
 /* ── Screen ── */
 
 export default function PortafolioScreen() {
   const insets = useSafeAreaInsets();
+  const { token } = useContext(autenticacionContext);
   const [hideValue, setHideValue] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [totalArs, setTotalArs] = useState(0);
+
+  const loadPortafolio = useCallback(() => {
+    if (!token) {
+      setLoading(false);
+      setError(null);
+      setAssets([]);
+      setTotalArs(0);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      const [
+        cuentasRes,
+        cryptoHold,
+        cryptoPrices,
+        accHold,
+        accPrices,
+      ] = await Promise.all([
+        cuentasService.getCuentas(token, 1, 50),
+        criptomonedasService.getCriptomonedas(token),
+        criptomonedasService.getPreciosCriptomonedas(token, "ars"),
+        accionesService.getAcciones(token),
+        accionesService.getPreciosAcciones(token, "ars"),
+      ]);
+
+      const cuentasItems = cuentasRes.items || [];
+      const rows: AssetRow[] = [];
+
+      let fiatArs = 0;
+      let criptoArs = 0;
+      let accionesArs = 0;
+
+      const cuentaRows = await Promise.all(
+        cuentasItems.map(async (c: Record<string, unknown>) => {
+          const saldoNum = parseFloat(String(c.saldo)) || 0;
+          if (saldoNum <= 0) return null;
+          const moneda = String(c.moneda || "ARS").toUpperCase();
+          const arsEq = await cuentasSaldoToArs(token, moneda, String(c.saldo));
+
+          const amountLabel = formatEsAR(saldoNum, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 8,
+          });
+
+          return {
+            id: `cuenta-${c.id}`,
+            name: moneda,
+            type: "Caja",
+            amount: amountLabel,
+            trend: null as number | null,
+            symbol:
+              moneda === "ARS"
+                ? "$"
+                : moneda === "USD"
+                  ? "US$"
+                  : moneda === "EUR"
+                    ? "€"
+                    : "●",
+            color: COLORS.fiat,
+            valueArs: arsEq,
+            category: "fiat" as const,
+          };
+        })
+      );
+
+      for (const r of cuentaRows) {
+        if (!r) continue;
+        fiatArs += r.valueArs;
+        rows.push(r);
+      }
+
+      const priceBySymbol: Record<string, { price: number; pct: number | null }> = {};
+      for (const p of cryptoPrices as { symbol: string; price: number; percentChange24h: number | null }[]) {
+        priceBySymbol[p.symbol] = { price: p.price, pct: p.percentChange24h };
+      }
+
+      for (const h of cryptoHold.items) {
+        const code = CRYPTO_API_TO_CODE[h.tipoCriptomoneda as keyof typeof CRYPTO_API_TO_CODE];
+        if (!code) continue;
+        const qty = parseFloat(String(h.monto)) || 0;
+        if (qty <= 0) continue;
+        const meta = priceBySymbol[code];
+        const price = meta?.price ?? 0;
+        const valArs = qty * price;
+        criptoArs += valArs;
+        const disp = CRYPTO_DISPLAY[code as keyof typeof CRYPTO_DISPLAY] ?? {
+          symbol: code.charAt(0),
+          color: "#888",
+        };
+        rows.push({
+          id: `cripto-${code}`,
+          name: code,
+          type: "Criptomoneda",
+          amount: formatCryptoQuantityEsAR(parseFloat(qty.toFixed(8))),
+          trend: meta?.pct ?? null,
+          symbol: disp.symbol,
+          color: disp.color,
+          valueArs: valArs,
+          category: "cripto",
+        });
+      }
+
+      const accPriceByTipo: Record<string, { price: number; pct: number | null }> = {};
+      for (const p of accPrices as { tipo: string; price: number; percentChange24h: number | null }[]) {
+        accPriceByTipo[p.tipo] = { price: p.price, pct: p.percentChange24h };
+      }
+
+      for (const a of accHold.items) {
+        const qty = parseFloat(String(a.monto)) || 0;
+        if (qty <= 0) continue;
+        const tipo = String(a.tipoAccion);
+        const sym = TIPO_ACCION_TO_SYMBOL[tipo as keyof typeof TIPO_ACCION_TO_SYMBOL] || tipo;
+        const meta = accPriceByTipo[tipo];
+        const price = meta?.price ?? 0;
+        const valArs = qty * price;
+        accionesArs += valArs;
+        const st = STOCK_DISPLAY[sym as keyof typeof STOCK_DISPLAY] ?? {
+          letter: sym.slice(0, 1),
+          color: "#3B82F6",
+        };
+        rows.push({
+          id: `accion-${tipo}`,
+          name: sym,
+          type: "Acciones",
+          amount: formatStockSharesEsAR(parseFloat(qty.toFixed(6))),
+          trend: meta?.pct ?? null,
+          symbol: st.letter,
+          color: st.color,
+          valueArs: valArs,
+          category: "acciones",
+        });
+      }
+
+      const total = fiatArs + criptoArs + accionesArs;
+      setTotalArs(total);
+      setAssets(rows.sort((a, b) => b.valueArs - a.valueArs));
+    })()
+      .catch((e) => {
+        setError(e?.message || "No se pudo cargar el portafolio");
+        setAssets([]);
+        setTotalArs(0);
+      })
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPortafolio();
+    }, [loadPortafolio])
+  );
+
+  const allocation = useMemo((): AllocationSlice[] => {
+    const fiat = assets.filter((a) => a.category === "fiat").reduce((s, a) => s + a.valueArs, 0);
+    const cripto = assets.filter((a) => a.category === "cripto").reduce((s, a) => s + a.valueArs, 0);
+    const acc = assets.filter((a) => a.category === "acciones").reduce((s, a) => s + a.valueArs, 0);
+    const t = fiat + cripto + acc;
+    if (t <= 0) {
+      return [
+        { label: "Sin datos", percentage: 100, color: COLORS.otro },
+      ];
+    }
+    const p = (x: number) => Math.round((x / t) * 100);
+    const slices: AllocationSlice[] = [];
+    if (fiat > 0) slices.push({ label: "Monedas", percentage: p(fiat), color: COLORS.fiat });
+    if (cripto > 0) slices.push({ label: "Cripto", percentage: p(cripto), color: COLORS.cripto });
+    if (acc > 0) slices.push({ label: "Acciones", percentage: p(acc), color: COLORS.acciones });
+    if (slices.length === 0) {
+      return [{ label: "Total", percentage: 100, color: COLORS.otro }];
+    }
+    const sum = slices.reduce((s, x) => s + x.percentage, 0);
+    if (sum < 100 && slices[0]) slices[0].percentage += 100 - sum;
+    return slices;
+  }, [assets]);
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
-      {/* ── Header ── */}
       <View style={s.header}>
         <View style={{ width: 68 }} />
         <Text style={s.headerTitle}>Portafolio</Text>
         <View style={s.headerRight}>
-          <Pressable hitSlop={8}>
-            <Ionicons
-              name="notifications-outline"
-              size={22}
-              color="rgba(255,255,255,0.8)"
-            />
-          </Pressable>
           <View style={s.avatar}>
             <Ionicons name="person" size={14} color="#0B3D2E" />
           </View>
@@ -159,6 +331,27 @@ export default function PortafolioScreen() {
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
       >
+        {!token && (
+          <View style={s.banner}>
+            <Text style={s.bannerText}>
+              Iniciá sesión para ver tu portafolio y tus activos reales.
+            </Text>
+          </View>
+        )}
+
+        {loading && (
+          <View style={s.loadingBox}>
+            <ActivityIndicator size="large" color="#1FA774" />
+            <Text style={s.loadingText}>Cargando activos…</Text>
+          </View>
+        )}
+
+        {error && !loading && (
+          <View style={s.banner}>
+            <Text style={s.errorText}>{error}</Text>
+          </View>
+        )}
+
         {/* ── Total Value Card ── */}
         <View style={s.valueCard}>
           <View style={s.valueTop}>
@@ -175,17 +368,10 @@ export default function PortafolioScreen() {
           <Text style={s.valueAmount}>
             {hideValue
               ? "••••••••"
-              : `$${TOTAL_VALUE.toLocaleString("en-US", { minimumFractionDigits: 2 })}`}
+              : token
+                ? formatArsPesoEsAR(totalArs)
+                : "—"}
           </Text>
-
-          {!hideValue && (
-            <View style={s.changeRow}>
-              <Ionicons name="arrow-up" size={14} color="#4ADE80" />
-              <Text style={s.changeText}>
-                +${DAILY_CHANGE.toFixed(2)} (+{DAILY_PERCENT.toFixed(2)}%)
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* ── Asset Allocation Card ── */}
@@ -193,17 +379,19 @@ export default function PortafolioScreen() {
           <Text style={s.cardTitle}>Asignación de Activos</Text>
 
           <View style={s.chartRow}>
-            <DonutChart data={ALLOCATION} size={150} strokeWidth={24} />
+            <DonutChart data={allocation} size={150} strokeWidth={24} />
 
             <View style={s.legend}>
-              {ALLOCATION.map((slice) => (
+              {allocation.map((slice) => (
                 <View key={slice.label} style={s.legendItem}>
                   <View
                     style={[s.legendDot, { backgroundColor: slice.color }]}
                   />
                   <Text style={s.legendLabel}>
                     {slice.label}:{" "}
-                    <Text style={s.legendPct}>{slice.percentage}%</Text>
+                    <Text style={s.legendPct}>
+                      {formatEsAR(slice.percentage, { maximumFractionDigits: 1 })}%
+                    </Text>
                   </Text>
                 </View>
               ))}
@@ -214,77 +402,88 @@ export default function PortafolioScreen() {
         {/* ── Assets List ── */}
         <Text style={s.sectionHeading}>Mis Activos</Text>
 
-        <View style={s.assetsList}>
-          {ASSETS.map((asset, i) => {
-            const up = asset.trend !== null && asset.trend >= 0;
-            const isEmoji = asset.symbol.length > 1;
+        {!loading && token && assets.length === 0 && !error && (
+          <View style={[s.assetsList, s.emptyWrap]}>
+            <Text style={s.emptyText}>
+              Todavía no hay activos para mostrar.{"\n"}
+              Tus cuentas en pesos/dólares, cripto y acciones aparecerán acá cuando tengas saldo.
+            </Text>
+          </View>
+        )}
 
-            return (
-              <View
-                key={asset.id}
-                style={[
-                  s.assetRow,
-                  i < ASSETS.length - 1 && s.assetRowBorder,
-                ]}
-              >
+        {assets.length > 0 && (
+          <View style={s.assetsList}>
+            {assets.map((asset, i) => {
+              const up = asset.trend !== null && asset.trend >= 0;
+              const isEmoji = asset.symbol.length > 1;
+
+              return (
                 <View
+                  key={asset.id}
                   style={[
-                    s.assetIcon,
-                    { backgroundColor: `${asset.color}18` },
+                    s.assetRow,
+                    i < assets.length - 1 && s.assetRowBorder,
                   ]}
                 >
-                  {isEmoji ? (
-                    <Text style={{ fontSize: 22 }}>{asset.symbol}</Text>
-                  ) : (
-                    <Text
-                      style={[s.assetSymbol, { color: asset.color }]}
-                    >
-                      {asset.symbol}
-                    </Text>
-                  )}
-                </View>
-
-                <View style={s.assetInfo}>
-                  <Text style={s.assetName}>{asset.name}</Text>
-                  <Text style={s.assetType}>{asset.type}</Text>
-                </View>
-
-                <View style={s.assetRight}>
-                  <Text style={s.assetAmount}>{asset.amount}</Text>
-                  <View style={s.assetTrendRow}>
-                    {asset.trend !== null ? (
-                      <>
-                        <Ionicons
-                          name={up ? "arrow-up" : "arrow-down"}
-                          size={12}
-                          color={up ? "#4ADE80" : "#EF4444"}
-                        />
-                        <Text
-                          style={[
-                            s.assetTrend,
-                            { color: up ? "#4ADE80" : "#EF4444" },
-                          ]}
-                        >
-                          {up ? "+" : ""}
-                          {asset.trend.toFixed(1)}%
-                        </Text>
-                      </>
+                  <View
+                    style={[
+                      s.assetIcon,
+                      { backgroundColor: `${asset.color}18` },
+                    ]}
+                  >
+                    {isEmoji ? (
+                      <Text style={{ fontSize: 22 }}>{asset.symbol}</Text>
                     ) : (
-                      <>
-                        <Ionicons
-                          name="arrow-up"
-                          size={12}
-                          color="rgba(255,255,255,0.25)"
-                        />
-                        <Text style={s.assetTrendNa}>N/A</Text>
-                      </>
+                      <Text
+                        style={[s.assetSymbol, { color: asset.color }]}
+                      >
+                        {asset.symbol}
+                      </Text>
                     )}
                   </View>
+
+                  <View style={s.assetInfo}>
+                    <Text style={s.assetName}>{asset.name}</Text>
+                    <Text style={s.assetType}>{asset.type}</Text>
+                  </View>
+
+                  <View style={s.assetRight}>
+                    <Text style={s.assetAmount}>{asset.amount}</Text>
+                    <View style={s.assetTrendRow}>
+                      {asset.trend !== null ? (
+                        <>
+                          <Ionicons
+                            name={up ? "arrow-up" : "arrow-down"}
+                            size={12}
+                            color={up ? "#4ADE80" : "#EF4444"}
+                          />
+                          <Text
+                            style={[
+                              s.assetTrend,
+                              { color: up ? "#4ADE80" : "#EF4444" },
+                            ]}
+                          >
+                            {up ? "+" : ""}
+                            {formatPercentValueEsAR(asset.trend, 1)}%
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons
+                            name="remove-outline"
+                            size={12}
+                            color="rgba(255,255,255,0.25)"
+                          />
+                          <Text style={s.assetTrendNa}>—</Text>
+                        </>
+                      )}
+                    </View>
+                  </View>
                 </View>
-              </View>
-            );
-          })}
-        </View>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -310,7 +509,6 @@ const cardShadow = Platform.select({
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#080E0B" },
 
-  /* Header */
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -342,7 +540,24 @@ const s = StyleSheet.create({
 
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
 
-  /* Total Value Card */
+  loadingBox: {
+    alignItems: "center",
+    paddingVertical: 24,
+    marginBottom: 8,
+  },
+  loadingText: { color: DIM, marginTop: 12, fontSize: 14 },
+
+  banner: {
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  bannerText: { color: DIM, fontSize: 14, lineHeight: 20 },
+  errorText: { color: "#F87171", fontSize: 14 },
+
   valueCard: {
     backgroundColor: CARD_BG,
     borderRadius: 22,
@@ -369,19 +584,7 @@ const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.5,
   },
-  changeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-    gap: 4,
-  },
-  changeText: {
-    color: "#4ADE80",
-    fontSize: 14,
-    fontWeight: "600",
-  },
 
-  /* Card (shared) */
   card: {
     backgroundColor: CARD_BG,
     borderRadius: 22,
@@ -398,7 +601,6 @@ const s = StyleSheet.create({
     marginBottom: 20,
   },
 
-  /* Donut Chart Area */
   chartRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -425,7 +627,6 @@ const s = StyleSheet.create({
     fontWeight: "700",
   },
 
-  /* Assets List */
   sectionHeading: {
     color: "#fff",
     fontSize: 20,
@@ -440,6 +641,13 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: BORDER,
     ...cardShadow,
+  },
+  emptyWrap: { padding: 24 },
+  emptyText: {
+    color: DIM,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: "center",
   },
   assetRow: {
     flexDirection: "row",
@@ -476,9 +684,11 @@ const s = StyleSheet.create({
   assetRight: { alignItems: "flex-end" },
   assetAmount: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     marginBottom: 3,
+    maxWidth: 180,
+    textAlign: "right",
   },
   assetTrendRow: {
     flexDirection: "row",

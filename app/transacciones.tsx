@@ -14,9 +14,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as movimientosService from "../src/Services/movimientos.service";
-import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
-type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type FilterKey = "todas" | "ingresos" | "gastos";
 
 interface Movimiento {
@@ -27,6 +26,7 @@ interface Movimiento {
   monto: string;
   descripcion: string | null;
   createdAt: string;
+  moneda?: string;
 }
 
 const FILTERS: { key: FilterKey; label: string; sentido?: string }[] = [
@@ -41,6 +41,43 @@ function formatDate(iso: string) {
     date: d.toLocaleDateString("es-AR", { day: "numeric", month: "short" }),
     time: d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
   };
+}
+
+function sumByCurrency(rows: Movimiento[], sentido: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    if (row.sentido !== sentido) continue;
+    const code = row.moneda || "ARS";
+    const n = parseFloat(row.monto);
+    if (!Number.isFinite(n)) continue;
+    map.set(code, (map.get(code) ?? 0) + n);
+  }
+  return map;
+}
+
+function SummaryAmounts({
+  sums,
+  prefix,
+  color,
+}: {
+  sums: Map<string, number>;
+  prefix: "+" | "-";
+  color: string;
+}) {
+  if (sums.size === 0) {
+    return <Text style={[s.summaryValue, { color }]}>—</Text>;
+  }
+  const entries = Array.from(sums.entries());
+  return (
+    <View style={{ gap: 4 }}>
+      {entries.map(([code, total]) => (
+        <Text key={code} style={[s.summaryValue, { color }]} numberOfLines={1}>
+          {prefix}
+          {formatMoneyWithSymbol(total, code)}
+        </Text>
+      ))}
+    </View>
+  );
 }
 
 export default function TransaccionesScreen() {
@@ -60,7 +97,7 @@ export default function TransaccionesScreen() {
     const sentido = FILTERS.find((f) => f.key === filter)?.sentido;
     movimientosService
       .getMovimientos(token, { page: 1, pageSize: 50, sentido })
-      .then((data) => setItems(data.items || []))
+      .then((data) => setItems(data.items as unknown as Movimiento[]))
       .catch((e) => {
         setError(e.message || "Error al cargar movimientos");
         setItems([]);
@@ -68,12 +105,8 @@ export default function TransaccionesScreen() {
       .finally(() => setLoading(false));
   }, [token, filter]);
 
-  const totalIngresos = items
-    .filter((m) => m.sentido === "ingreso")
-    .reduce((s, m) => s + parseFloat(m.monto), 0);
-  const totalGastos = items
-    .filter((m) => m.sentido === "egreso")
-    .reduce((s, m) => s + parseFloat(m.monto), 0);
+  const ingresosByMoneda = sumByCurrency(items, "ingreso");
+  const gastosByMoneda = sumByCurrency(items, "egreso");
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -93,18 +126,14 @@ export default function TransaccionesScreen() {
               <Ionicons name="arrow-down" size={16} color="#4ADE80" />
             </View>
             <Text style={s.summaryLabel}>Ingresos</Text>
-            <Text style={[s.summaryValue, { color: "#4ADE80" }]}>
-              +${formatFiatByCurrency(totalIngresos, "ARS")}
-            </Text>
+            <SummaryAmounts sums={ingresosByMoneda} prefix="+" color="#4ADE80" />
           </View>
           <View style={[s.summaryBox, { borderColor: "rgba(239,68,68,0.2)" }]}>
             <View style={[s.summaryIcon, { backgroundColor: "rgba(239,68,68,0.12)" }]}>
               <Ionicons name="arrow-up" size={16} color="#EF4444" />
             </View>
             <Text style={s.summaryLabel}>Gastos</Text>
-            <Text style={[s.summaryValue, { color: "#EF4444" }]}>
-              -${formatFiatByCurrency(totalGastos, "ARS")}
-            </Text>
+            <SummaryAmounts sums={gastosByMoneda} prefix="-" color="#EF4444" />
           </View>
         </View>
 
@@ -142,21 +171,30 @@ export default function TransaccionesScreen() {
           {items.map((t, i) => {
             const isIncome = t.sentido === "ingreso";
             const montoNum = parseFloat(t.monto);
+            const moneda = t.moneda || "ARS";
             const { date, time } = formatDate(t.createdAt);
             const label = t.descripcion || `Transferencia ${t.tipoOperacion}`;
             return (
-              <View key={t.id} style={[s.row, i < items.length - 1 && s.rowBorder]}>
-                <View style={[s.txIcon, { backgroundColor: isIncome ? "rgba(74,222,128,0.15)" : "rgba(239,68,68,0.15)" }]}>
-                  <Ionicons name="swap-horizontal-outline" size={20} color={isIncome ? "#4ADE80" : "#EF4444"} />
+              <Pressable
+                key={t.id}
+                onPress={() => router.push(`/transaccion/${t.id}` as any)}
+                style={({ pressed }) => [pressed && { opacity: 0.72 }]}
+              >
+                <View style={[s.row, i < items.length - 1 && s.rowBorder]}>
+                  <View style={[s.txIcon, { backgroundColor: isIncome ? "rgba(74,222,128,0.15)" : "rgba(239,68,68,0.15)" }]}>
+                    <Ionicons name="swap-horizontal-outline" size={20} color={isIncome ? "#4ADE80" : "#EF4444"} />
+                  </View>
+                  <View style={s.txInfo}>
+                    <Text style={s.txLabel} numberOfLines={1}>{label}</Text>
+                    <Text style={s.txMeta}>{t.tipoOperacion} · {date}, {time}</Text>
+                  </View>
+                  <Text style={[s.txAmount, { color: isIncome ? "#4ADE80" : "#EF4444" }]}>
+                    {isIncome ? "+" : "-"}
+                    {formatMoneyWithSymbol(montoNum, moneda)}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.2)" style={{ marginLeft: 4 }} />
                 </View>
-                <View style={s.txInfo}>
-                  <Text style={s.txLabel} numberOfLines={1}>{label}</Text>
-                  <Text style={s.txMeta}>{t.tipoOperacion} · {date}, {time}</Text>
-                </View>
-                <Text style={[s.txAmount, { color: isIncome ? "#4ADE80" : "#EF4444" }]}>
-                  {isIncome ? "+" : "-"}${formatFiatByCurrency(montoNum, "ARS")}
-                </Text>
-              </View>
+              </Pressable>
             );
           })}
         </View>

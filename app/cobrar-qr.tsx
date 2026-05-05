@@ -131,7 +131,7 @@ export default function CobrarQRScreen() {
             <Text style={s.label}>Monto a cobrar</Text>
             <View style={s.inputRow}>
               <Text style={s.currencySymbol}>
-                {selectedCuenta?.moneda === "ARS" ? "$" : selectedCuenta?.moneda + " "}
+                {selectedCuenta?.moneda ?? "—"}
               </Text>
               <TextInput
                 style={s.amountInput}

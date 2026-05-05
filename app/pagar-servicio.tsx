@@ -16,7 +16,7 @@ import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as facturasService from "../src/Services/facturas.service";
 import * as pagosServiciosService from "../src/Services/pagos-servicios.service";
-import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 import { AppToast } from "../src/components/AppToast";
 import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
@@ -81,7 +81,7 @@ export default function PagarServicioScreen() {
         facturasService.getFacturas(token, { estado: "pendiente" }),
         cuentasService.getCuentas(token),
       ]);
-      setFacturas(facturasRes.items || []);
+      setFacturas((facturasRes.items || []) as Factura[]);
       setCuentas(filterCuentasBySupportedFiat(cuentasRes.items || []));
     } catch (e: any) {
       showToast(e?.message || "No se pudieron cargar los datos", "error");
@@ -196,7 +196,7 @@ export default function PagarServicioScreen() {
               <Text style={s.scanHintTitle}>Datos detectados del código</Text>
               {!!params.nombreEnte && <Text style={s.scanHintText}>Empresa: {String(params.nombreEnte)}</Text>}
               {Number.isFinite(montoEscaneado) && (
-                <Text style={s.scanHintText}>Monto: ${formatFiatByCurrency(montoEscaneado, "ARS")}</Text>
+                <Text style={s.scanHintText}>Monto: {formatMoneyWithSymbol(montoEscaneado, "ARS")}</Text>
               )}
               {Number.isFinite(montoEscaneado) && cuentas.length > 0 && (
                 <View style={s.scanPayWrap}>
@@ -214,7 +214,7 @@ export default function PagarServicioScreen() {
                           {c.alias} · {c.moneda}
                         </Text>
                         <Text style={s.cuentaOptionSaldo}>
-                          ${formatFiatByCurrency(parseFloat(c.saldo) || 0, c.moneda)}
+                          {formatMoneyWithSymbol(parseFloat(c.saldo) || 0, c.moneda)}
                         </Text>
                         {pagandoEscaneo ? (
                           <ActivityIndicator size="small" color="#1FA774" />
@@ -249,7 +249,7 @@ export default function PagarServicioScreen() {
                   </View>
                   <View style={s.facturaInfo}>
                     <Text style={s.facturaDesc}>{desc}</Text>
-                    <Text style={s.facturaMonto}>${formatFiatByCurrency(monto, "ARS")}</Text>
+                    <Text style={s.facturaMonto}>{formatMoneyWithSymbol(monto, "ARS")}</Text>
                     {esSugerida && <Text style={s.sugerida}>Sugerida por escaneo</Text>}
                   </View>
                 </View>
@@ -270,7 +270,7 @@ export default function PagarServicioScreen() {
                         {c.alias} · {c.moneda}
                       </Text>
                       <Text style={s.cuentaOptionSaldo}>
-                        ${formatFiatByCurrency(parseFloat(c.saldo) || 0, c.moneda)}
+                        {formatMoneyWithSymbol(parseFloat(c.saldo) || 0, c.moneda)}
                       </Text>
                       {pagando === f.id ? (
                         <ActivityIndicator size="small" color="#1FA774" />

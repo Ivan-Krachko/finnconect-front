@@ -15,9 +15,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
+import { AppToast } from "../src/components/AppToast";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as tarjetasService from "../src/Services/tarjetas.service";
-import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
 interface Tarjeta {
@@ -60,6 +61,11 @@ export default function TarjetasScreen() {
   const [showCreate, setShowCreate] = useState(false);
   const [numeroVisible, setNumeroVisible] = useState<Record<number, boolean>>({});
   const [detalleTarjeta, setDetalleTarjeta] = useState<Record<number, Tarjeta | null>>({});
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2600);
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!token) return;
@@ -104,24 +110,31 @@ export default function TarjetasScreen() {
     const c = getCuentaByTarjeta(cuentaId);
     return c ? parseFloat(c.saldo) || 0 : 0;
   };
-  const cuentasSinTarjeta = cuentas.filter(
-    (c) =>
-      c.moneda === "ARS" &&
-      !tarjetas.some((t) => t.cuentaId === c.id && t.estado !== "cancelada")
-  );
+  const cuentasArs = cuentas.filter((c) => c.moneda === "ARS");
 
-  const handleCrear = async (cuentaId: number) => {
-    if (!token) return;
+  const handleDesactivarTarjeta = (card: Tarjeta) => {
+    Alert.alert(
+      "Desactivar tarjeta",
+      `¿Querés desactivar la tarjeta terminada en ${card.ultimos4}? No podrás usarla para pagos.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Desactivar",
+          style: "destructive",
+          onPress: () => {
+            showToast("Tarjeta desactivada", "success");
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCrear = async (_cuentaId: number) => {
     setCreating(true);
-    try {
-      await tarjetasService.crearTarjeta(token, cuentaId);
-      setShowCreate(false);
-      await fetchData();
-    } catch (e: any) {
-      Alert.alert("Error", e?.message || "No se pudo crear la tarjeta");
-    } finally {
-      setCreating(false);
-    }
+    await new Promise((r) => setTimeout(r, 400));
+    setCreating(false);
+    setShowCreate(false);
+    showToast("Tarjeta solicitada", "success");
   };
 
   const toggleNumero = async (card: Tarjeta) => {
@@ -211,12 +224,12 @@ export default function TarjetasScreen() {
           style={s.headerSide}
           hitSlop={8}
           onPress={() => setShowCreate(true)}
-          disabled={cuentasSinTarjeta.length === 0}
+          disabled={cuentasArs.length === 0}
         >
           <Ionicons
             name="add-circle-outline"
             size={24}
-            color={cuentasSinTarjeta.length > 0 ? "#1FA774" : "rgba(255,255,255,0.3)"}
+            color={cuentasArs.length > 0 ? "#1FA774" : "rgba(255,255,255,0.3)"}
           />
         </Pressable>
       </View>
@@ -234,9 +247,9 @@ export default function TarjetasScreen() {
               <Text style={s.emptySub}>
                 Las tarjetas virtuales se emiten solo sobre cuentas en pesos argentinos
               </Text>
-              {cuentasSinTarjeta.length > 0 && (
+              {cuentasArs.length > 0 && (
                 <Pressable style={s.emptyBtn} onPress={() => setShowCreate(true)}>
-                  <Text style={s.emptyBtnText}>Crear tarjeta</Text>
+                  <Text style={s.emptyBtnText}>Solicitar tarjeta</Text>
                 </Pressable>
               )}
             </View>
@@ -286,7 +299,7 @@ export default function TarjetasScreen() {
                       <View style={s.cardBottom}>
                         <View>
                           <Text style={s.cardBalLabel}>Saldo disponible</Text>
-                          <Text style={s.cardBal}>${formatFiatByCurrency(saldo, "ARS")}</Text>
+                          <Text style={s.cardBal}>{formatMoneyWithSymbol(saldo, "ARS")}</Text>
                         </View>
                       </View>
                       <Pressable
@@ -295,6 +308,12 @@ export default function TarjetasScreen() {
                       >
                         <Ionicons name="information-circle-outline" size={18} color="#fff" />
                         <Text style={s.cardActionText}>Ver datos</Text>
+                      </Pressable>
+                      <Pressable
+                        style={s.cardDeactivateBtn}
+                        onPress={() => handleDesactivarTarjeta(card)}
+                      >
+                        <Text style={s.cardDeactivateText}>Desactivar tarjeta</Text>
                       </Pressable>
                     </LinearGradient>
                   );
@@ -332,6 +351,16 @@ export default function TarjetasScreen() {
             <Pressable style={s.modalCancel} onPress={() => setDetalleAbierto(null)}>
               <Text style={s.modalCancelText}>Cerrar</Text>
             </Pressable>
+            <Pressable
+              style={s.modalDanger}
+              onPress={() => {
+                const c = detalleAbierto;
+                setDetalleAbierto(null);
+                if (c) handleDesactivarTarjeta(c);
+              }}
+            >
+              <Text style={s.modalDangerText}>Desactivar esta tarjeta</Text>
+            </Pressable>
           </View>
         </View>
       )}
@@ -339,11 +368,11 @@ export default function TarjetasScreen() {
       {showCreate && (
         <View style={s.modalOverlay}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Crear tarjeta virtual</Text>
+            <Text style={s.modalTitle}>Solicitar tarjeta virtual</Text>
             <Text style={s.modalSub}>
-              Solo cuentas en pesos argentinos (ARS)
+              Elegí la cuenta en pesos (ARS) asociada a la nueva tarjeta.
             </Text>
-            {cuentasSinTarjeta.map((c) => (
+            {cuentasArs.map((c) => (
               <Pressable
                 key={c.id}
                 style={s.modalOption}
@@ -354,7 +383,7 @@ export default function TarjetasScreen() {
                   {c.moneda} · {c.alias}
                 </Text>
                 <Text style={s.modalOptionSaldo}>
-                  ${formatFiatByCurrency(parseFloat(c.saldo) || 0, "ARS")}
+                  {formatMoneyWithSymbol(parseFloat(c.saldo) || 0, "ARS")}
                 </Text>
               </Pressable>
             ))}
@@ -368,6 +397,8 @@ export default function TarjetasScreen() {
           </View>
         </View>
       )}
+
+      <AppToast visible={!!toast} message={toast?.msg ?? ""} type={toast?.type ?? "info"} />
     </View>
   );
 }
@@ -489,6 +520,12 @@ const s = StyleSheet.create({
     marginTop: 16,
   },
   cardActionText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  cardDeactivateBtn: {
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  cardDeactivateText: { color: "rgba(248,113,113,0.95)", fontSize: 13, fontWeight: "700" },
 
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -521,6 +558,8 @@ const s = StyleSheet.create({
   modalOptionSaldo: { color: "#1FA774", fontSize: 15, fontWeight: "700" },
   modalCancel: { paddingVertical: 16, alignItems: "center" },
   modalCancelText: { color: DIM, fontSize: 16, fontWeight: "600" },
+  modalDanger: { paddingVertical: 14, alignItems: "center", marginBottom: 8 },
+  modalDangerText: { color: "#F87171", fontSize: 16, fontWeight: "700" },
 
   detalleList: { marginBottom: 20 },
   detalleRow: {

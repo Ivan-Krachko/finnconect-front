@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
 import * as pagosServiciosService from "../../src/Services/pagos-servicios.service";
-import { formatDecimalEsAR } from "../../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../../src/utils/formatNumber";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -90,11 +90,6 @@ const STATUS_CONFIG: Record<
   fallido: { label: "Fallido", bg: "rgba(239,68,68,0.18)", text: "#F87171" },
 };
 
-function fmtAmount(n: number): string {
-  return formatDecimalEsAR(n, 2, 2);
-}
-
-/* ── Screen ── */
 
 export default function PagosScreen() {
   const insets = useSafeAreaInsets();
@@ -231,7 +226,7 @@ export default function PagosScreen() {
 
                 <View style={s.paymentRight}>
                   <Text style={s.paymentAmount}>
-                    - ${fmtAmount(payment.amount)}
+                    -{formatMoneyWithSymbol(payment.amount, "ARS")}
                   </Text>
                   <Text style={s.paymentDate}>{payment.date}</Text>
                   <View style={[s.badge, { backgroundColor: status.bg }]}>

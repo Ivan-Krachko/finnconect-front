@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
-import { formatFiatByCurrency, formatMoneyWithSymbol } from "../../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../../src/utils/formatNumber";
 import * as cuentasService from "../../src/Services/cuentas.service";
 import * as movimientosService from "../../src/Services/movimientos.service";
 import { getMe } from "../../src/Services/usuarios.service";
@@ -75,9 +75,9 @@ const ACTION_ICON_COLORS: Record<string, string> = {
   "grid-outline": "#6B7280",
 };
 
-function formatCurrency(amount: number): string {
+function formatSignedMoney(amount: number, currency: string): string {
   const sign = amount < 0 ? "-" : "+";
-  return `${sign}${formatMoneyWithSymbol(Math.abs(amount), "ARS")}`;
+  return `${sign}${formatMoneyWithSymbol(Math.abs(amount), currency)}`;
 }
 
 export default function Home() {
@@ -87,7 +87,7 @@ export default function Home() {
   const [showBalance, setShowBalance] = useState(true);
   const [saldoPrincipal, setSaldoPrincipal] = useState<number | null>(null);
   const [movimientos, setMovimientos] = useState<
-    { id: number; label: string; amount: number; date: string }[]
+    { id: number; label: string; amount: number; date: string; moneda: string }[]
   >([]);
   const [nombreUsuario, setNombreUsuario] = useState<string | null>(null);
 
@@ -111,6 +111,7 @@ export default function Home() {
           id: m.id,
           label: m.descripcion || `Transferencia ${m.tipoOperacion}`,
           amount: m.sentido === "ingreso" ? parseFloat(m.monto) : -parseFloat(m.monto),
+          moneda: m.moneda || "ARS",
           date: new Date(m.createdAt).toLocaleDateString("es-AR", {
             day: "numeric",
             month: "short",
@@ -140,7 +141,7 @@ export default function Home() {
   );
 
   const displayBalance =
-    saldoPrincipal !== null ? formatFiatByCurrency(saldoPrincipal, "ARS") : "—";
+    saldoPrincipal !== null ? formatMoneyWithSymbol(saldoPrincipal, "ARS", { showIsoCode: false }) : "—";
 
   return (
     <View style={s.container}>
@@ -197,9 +198,8 @@ export default function Home() {
 
           <View style={s.amountRow}>
             <Text style={s.balanceAmount}>
-              {showBalance ? `$${displayBalance}` : "••••••••"}
+              {showBalance ? displayBalance : "••••••••"}
             </Text>
-            {showBalance && saldoPrincipal !== null && <Text style={s.balanceCents}>.00</Text>}
           </View>
 
         </View>
@@ -246,42 +246,48 @@ export default function Home() {
             {movimientos.map((tx, i) => {
               const isIncome = tx.amount > 0;
               return (
-                <View
+                <Pressable
                   key={tx.id}
-                  style={[
-                    s.txRow,
-                    i < movimientos.length - 1 && s.txRowBorder,
-                  ]}
+                  onPress={() => router.push(`/transaccion/${tx.id}` as any)}
+                  style={({ pressed }) => [pressed && { opacity: 0.72 }]}
                 >
                   <View
                     style={[
-                      s.txIconCircle,
-                      {
-                        backgroundColor: isIncome ? "rgba(31,167,116,0.15)" : "rgba(239,68,68,0.15)",
-                      },
+                      s.txRow,
+                      i < movimientos.length - 1 && s.txRowBorder,
                     ]}
                   >
-                    <Ionicons
-                      name="swap-horizontal-outline"
-                      size={20}
-                      color={isIncome ? "#1FA774" : "#EF4444"}
-                    />
-                  </View>
-                  <View style={s.txInfo}>
-                    <Text style={s.txName} numberOfLines={1}>
-                      {tx.label}
+                    <View
+                      style={[
+                        s.txIconCircle,
+                        {
+                          backgroundColor: isIncome ? "rgba(31,167,116,0.15)" : "rgba(239,68,68,0.15)",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="swap-horizontal-outline"
+                        size={20}
+                        color={isIncome ? "#1FA774" : "#EF4444"}
+                      />
+                    </View>
+                    <View style={s.txInfo}>
+                      <Text style={s.txName} numberOfLines={1}>
+                        {tx.label}
+                      </Text>
+                      <Text style={s.txDate}>{tx.date}</Text>
+                    </View>
+                    <Text
+                      style={[
+                        s.txAmount,
+                        { color: isIncome ? "#1FA774" : "#EF4444" },
+                      ]}
+                    >
+                      {formatSignedMoney(tx.amount, tx.moneda)}
                     </Text>
-                    <Text style={s.txDate}>{tx.date}</Text>
+                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.2)" style={{ marginLeft: 4 }} />
                   </View>
-                  <Text
-                    style={[
-                      s.txAmount,
-                      { color: isIncome ? "#1FA774" : "#EF4444" },
-                    ]}
-                  >
-                    {formatCurrency(tx.amount)}
-                  </Text>
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -368,11 +374,6 @@ const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.5,
   },
-  balanceCents: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 20,
-    fontWeight: "600",
-  },
 
   // ── Content Sheet ──
   sheet: {
@@ -443,7 +444,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 14,
     paddingHorizontal: 16,
-    gap: 14,
+    gap: 10,
   },
   txRowBorder: {
     borderBottomWidth: 1,

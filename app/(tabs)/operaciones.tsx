@@ -23,8 +23,8 @@ import { FIAT_CURRENCIES_UI, filterCuentasBySupportedFiat } from "../../src/cons
 import { parseAmount } from "../../src/utils/parseAmount";
 import {
   formatCryptoQuantityEsAR,
-  formatFiatByCurrency,
-  formatFiatConversionEsAR,
+  formatFiatConversionMoneyEsAR,
+  formatMoneyWithSymbol,
   formatPercentValueEsAR,
   formatStockSharesEsAR,
 } from "../../src/utils/formatNumber";
@@ -322,7 +322,7 @@ export default function OperacionesScreen() {
       setFxAmount("");
       refrescarSaldosDivisas();
       showToast(
-        `Conversión lista: ${typeof res.montoDestino === "number" ? formatFiatConversionEsAR(res.montoDestino, fxReceiveCurrency) : res.montoDestino} ${fxReceiveCurrency}`,
+        `Conversión lista: ${typeof res.montoDestino === "number" ? formatFiatConversionMoneyEsAR(res.montoDestino, fxReceiveCurrency) : res.montoDestino}`,
         "success"
       );
     } catch (e: any) {
@@ -751,7 +751,7 @@ export default function OperacionesScreen() {
                       <ActivityIndicator size="small" color="#1FA774" />
                     ) : (
                       <Text style={s.amountValue} numberOfLines={1} adjustsFontSizeToFit>
-                        {formatFiatConversionEsAR(fxReceive, fxReceiveCurrency)}
+                        {formatFiatConversionMoneyEsAR(fxReceive, fxReceiveCurrency)}
                       </Text>
                     )}
                   </View>
@@ -762,7 +762,7 @@ export default function OperacionesScreen() {
                 <Text style={s.rateText}>
                   Tasa:{" "}
                   <Text style={s.rateHl}>
-                    1 {fxSendCurrency} = {formatFiatConversionEsAR(fxRate, fxReceiveCurrency)} {fxReceiveCurrency}
+                    1 {fxSendCurrency} = {formatFiatConversionMoneyEsAR(fxRate, fxReceiveCurrency)}
                   </Text>
                 </Text>
               )}
@@ -813,7 +813,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridCode}>{c.code}</Text>
                     <Text style={s.gridName}>{c.name}</Text>
                     <View style={s.gridBottom}>
-                      <Text style={s.gridPrice}>{formatFiatByCurrency(c.rateToArs, "ARS")} ARS</Text>
+                      <Text style={s.gridPrice}>{formatMoneyWithSymbol(c.rateToArs, "ARS")}</Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
                   </View>
@@ -1029,7 +1029,7 @@ export default function OperacionesScreen() {
                         </View>
                       </View>
                       <Text style={s.amountValueBlock}>
-                        {formatFiatByCurrency(cryptoReceive, cryptoSendCurrency)} {cryptoSendCurrency}
+                        {formatMoneyWithSymbol(cryptoReceive, cryptoSendCurrency)}
                       </Text>
                     </>
                   )}
@@ -1039,7 +1039,7 @@ export default function OperacionesScreen() {
               <Text style={s.rateText}>
                 Precio:{" "}
                 <Text style={s.rateHl}>
-                  1 {activeCrypto.code} = {formatFiatByCurrency(price, cryptoSendCurrency)} {cryptoSendCurrency}
+                  1 {activeCrypto.code} = {formatMoneyWithSymbol(price, cryptoSendCurrency)}
                 </Text>
               </Text>
 
@@ -1086,7 +1086,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridName}>{c.name}</Text>
                     <View style={s.gridBottom}>
                       <Text style={s.gridPrice}>
-                        {formatFiatByCurrency(c.priceArs, cryptoSendCurrency)} {cryptoSendCurrency}
+                        {formatMoneyWithSymbol(c.priceArs, cryptoSendCurrency)}
                       </Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>
@@ -1297,7 +1297,7 @@ export default function OperacionesScreen() {
                         </View>
                       </View>
                       <Text style={s.amountValueBlock}>
-                        {formatFiatByCurrency(stockReceiveFiat, stockSendCurrency)} {stockSendCurrency}
+                        {formatMoneyWithSymbol(stockReceiveFiat, stockSendCurrency)}
                       </Text>
                     </>
                   )}
@@ -1308,7 +1308,7 @@ export default function OperacionesScreen() {
                 Precio:{" "}
                 <Text style={s.rateHl}>
                   1 {activeStock.ticker} ={" "}
-                  {formatFiatByCurrency(priceStock, stockSendCurrency)} {stockSendCurrency}
+                  {formatMoneyWithSymbol(priceStock, stockSendCurrency)}
                 </Text>
               </Text>
 
@@ -1352,7 +1352,7 @@ export default function OperacionesScreen() {
                     <Text style={s.gridName}>{st.name}</Text>
                     <View style={s.gridBottom}>
                       <Text style={s.gridPrice}>
-                        {formatFiatByCurrency(st.priceArs, stockSendCurrency)} {stockSendCurrency}
+                        {formatMoneyWithSymbol(st.priceArs, stockSendCurrency)}
                       </Text>
                       <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.2)" />
                     </View>

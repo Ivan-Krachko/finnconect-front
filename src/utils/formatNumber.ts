@@ -37,10 +37,17 @@ export function formatPercentValueEsAR(n: number, fractionDigits = 2): string {
   return formatDecimalEsAR(n, fractionDigits, fractionDigits);
 }
 
-/** Total / montos ARS con prefijo $ y hasta 2 decimales. */
+function fiatSymbolPrefix(currency: string): string {
+  const c = currency.toUpperCase();
+  if (c === "USD") return "US$";
+  if (c === "EUR") return "€";
+  if (c === "BRL") return "R$";
+  return "$";
+}
+
+/** Total / montos ARS con símbolo y código ISO (sin ambigüedad con otras monedas). */
 export function formatArsPesoEsAR(n: number): string {
-  if (!ok(n)) return "—";
-  return `$${formatEsAR(n, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  return formatMoneyWithSymbol(n, "ARS");
 }
 
 /**
@@ -77,11 +84,34 @@ export function formatFiatConversionEsAR(n: number, code: string): string {
   return formatEsAR(n, { minimumFractionDigits: 0, maximumFractionDigits: maxF });
 }
 
-/** Saldo con prefijo ($ / US$ / €). */
-export function formatMoneyWithSymbol(n: number, currency: string): string {
-  const pref =
-    currency === "USD" ? "US$" : currency === "EUR" ? "€" : "$";
-  return `${pref}${formatFiatByCurrency(n, currency)}`;
+/**
+ * Monto fiat: símbolo local + número (es-AR); por defecto también el código ISO.
+ * Ej.: `$1.234,56 ARS` o, con `showIsoCode: false`, `$1.234,56`.
+ */
+export function formatMoneyWithSymbol(
+  n: number,
+  currency: string,
+  opts?: { showIsoCode?: boolean }
+): string {
+  if (!ok(n)) return "—";
+  const code = currency.toUpperCase();
+  const pref = fiatSymbolPrefix(code);
+  const num = formatFiatByCurrency(n, code);
+  if (opts?.showIsoCode === false) {
+    return `${pref}${num}`;
+  }
+  return `${pref}${num} ${code}`;
+}
+
+/**
+ * Como `formatMoneyWithSymbol`, pero con la misma lógica de decimales que
+ * `formatFiatConversionEsAR` (valores muy chicos en conversión).
+ */
+export function formatFiatConversionMoneyEsAR(n: number, currency: string): string {
+  if (!ok(n)) return "—";
+  const code = currency.toUpperCase();
+  const pref = fiatSymbolPrefix(code);
+  return `${pref}${formatFiatConversionEsAR(n, code)} ${code}`;
 }
 
 /** Cantidades de cripto (hasta 4 / 6 / 8 decimales). */

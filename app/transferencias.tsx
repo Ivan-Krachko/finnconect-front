@@ -18,7 +18,7 @@ import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
 import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 import { parseAmount } from "../src/utils/parseAmount";
-import { formatFiatByCurrency, formatIntegerEsAR } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
 function normalizeAmountInput(t: string): string {
   const lastPeriod = t.lastIndexOf(".");
@@ -250,7 +250,7 @@ export default function TransferenciasScreen() {
             <View style={s.quickAmounts}>
               {[5000, 10000, 50000, 100000].map((v) => (
                 <Pressable key={v} style={s.quickBtn} onPress={() => setAmount(String(v))}>
-                  <Text style={s.quickBtnText}>${formatIntegerEsAR(v)}</Text>
+                  <Text style={s.quickBtnText}>{formatMoneyWithSymbol(v, cuentaDestino.moneda)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -289,8 +289,7 @@ export default function TransferenciasScreen() {
             <View style={s.confirmRow}>
               <Text style={s.confirmLabel}>Monto</Text>
               <Text style={s.confirmValue}>
-                {cuentaDestino.moneda === "ARS" ? "$" : cuentaDestino.moneda + " "}
-                {formatFiatByCurrency(parseAmount(amount), cuentaDestino.moneda)}
+                {formatMoneyWithSymbol(parseAmount(amount), cuentaDestino.moneda)}
               </Text>
             </View>
             <View style={s.deductBanner}>

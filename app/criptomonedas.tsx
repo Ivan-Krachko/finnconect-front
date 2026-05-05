@@ -18,7 +18,7 @@ import * as criptomonedasService from "../src/Services/criptomonedas.service";
 import { CRYPTO_DISPLAY, CRYPTO_API_TO_CODE, CONVERT_OPTIONS } from "../src/constants/criptomonedas";
 import {
   formatCryptoQuantityEsAR,
-  formatFiatByCurrency,
+  formatMoneyWithSymbol,
   formatPercentValueEsAR,
 } from "../src/utils/formatNumber";
 
@@ -39,10 +39,6 @@ interface CryptoDisplay {
   price: number;
   holdings: number;
   trend24h: number | null;
-}
-
-function fmtNumber(n: number, currency: string) {
-  return formatFiatByCurrency(n, currency.toUpperCase());
 }
 
 export default function CriptomonedasScreen() {
@@ -106,7 +102,7 @@ export default function CriptomonedasScreen() {
   const avgTrend24h =
     withTrend.length > 0 ? withTrend.reduce((s, c) => s + (c.trend24h ?? 0), 0) / withTrend.length : 0;
 
-  const currencyLabel = CONVERT_OPTIONS.find((o) => o.code === convert)?.label ?? convert.toUpperCase();
+  const fiatCode = convert.toUpperCase();
 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
@@ -164,7 +160,7 @@ export default function CriptomonedasScreen() {
             <View style={s.summaryCard}>
               <Text style={s.summaryLabel}>Valor Total en Cripto</Text>
               <Text style={s.summaryValue}>
-                {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(totalValue, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+                {formatMoneyWithSymbol(totalValue, fiatCode)}
               </Text>
               <View style={s.summaryChips}>
                 <View style={s.chipGreen}>
@@ -196,7 +192,7 @@ export default function CriptomonedasScreen() {
                     </View>
                     <View style={s.right}>
                       <Text style={s.coinValue}>
-                        {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(value, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+                        {formatMoneyWithSymbol(value, fiatCode)}
                       </Text>
                       <View style={s.trendRow}>
                         {c.trend24h !== null ? (
@@ -238,7 +234,7 @@ export default function CriptomonedasScreen() {
                     </View>
                     <View style={s.right}>
                       <Text style={s.coinValue}>
-                        {currencyLabel === "ARS" ? "$" : ""}{fmtNumber(c.price, convert)}{currencyLabel === "ARS" ? "" : ` ${currencyLabel}`}
+                        {formatMoneyWithSymbol(c.price, fiatCode)}
                       </Text>
                       <View style={s.trendRow}>
                         {c.trend24h !== null ? (

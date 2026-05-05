@@ -22,7 +22,7 @@ import * as cuentasService from "../src/Services/cuentas.service";
 import * as pagosServiciosService from "../src/Services/pagos-servicios.service";
 import { safeBack } from "../src/utils/navigation";
 import { decodificarCodigoBarrasRecaudacion, type Decodificado } from "../src/utils/barcodeRecaudacion";
-import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 import { AppToast } from "../src/components/AppToast";
 import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
@@ -248,7 +248,7 @@ export default function EscanearBarrasScreen() {
                 <View style={s.montoBlock}>
                   <Text style={s.montoLabel}>Total a pagar</Text>
                   <Text style={s.montoGrande}>
-                    $ {formatFiatByCurrency(f.monto, "ARS")}
+                    {formatMoneyWithSymbol(f.monto, "ARS")}
                   </Text>
                 </View>
               )}

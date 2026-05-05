@@ -17,7 +17,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
-import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 import { isSupportedFiat, filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
 function parseCobrarQr(data: string): { alias: string; monto: string; moneda: string } | null {
@@ -220,12 +220,15 @@ export default function PagarQRScreen() {
   if (confirmacion) {
     const { parsed, cuentaDestino, cuentaOrigen } = confirmacion;
     const montoNum = parseFloat(parsed.monto) || 0;
-    const montoFmt = formatFiatByCurrency(montoNum, parsed.moneda);
-    const simbolo = parsed.moneda === "ARS" ? "$" : "";
     const destinoNombre = [cuentaDestino.usuarioNombre, cuentaDestino.usuarioApellido]
       .filter(Boolean)
       .join(" ") || cuentaDestino.alias;
     const saldoOrigen = cuentaOrigen.saldo ?? "—";
+    const saldoNum = parseFloat(String(saldoOrigen).replace(",", "."));
+    const saldoTxt =
+      saldoOrigen === "—" || !Number.isFinite(saldoNum)
+        ? String(saldoOrigen)
+        : formatMoneyWithSymbol(saldoNum, parsed.moneda);
 
     const toastTranslateY = toastAnim.interpolate({
       inputRange: [0, 1],
@@ -252,9 +255,7 @@ export default function PagarQRScreen() {
               <Text style={s.confirmText}>
                 De cuenta en {parsed.moneda} con saldo{" "}
                 <Text style={s.confirmValue}>
-                  {saldoVisible
-                    ? `${parsed.moneda === "ARS" ? "$" : ""}${saldoOrigen}${parsed.moneda !== "ARS" ? ` ${parsed.moneda}` : ""}`
-                    : "*****"}
+                  {saldoVisible ? saldoTxt : "*****"}
                 </Text>
               </Text>
               <Pressable
@@ -273,7 +274,7 @@ export default function PagarQRScreen() {
             <Text style={s.confirmValue}>{destinoNombre}</Text>
             <Text style={s.confirmLabel}>Monto</Text>
             <Text style={s.confirmValue}>
-              {simbolo}{montoFmt}{parsed.moneda !== "ARS" ? ` ${parsed.moneda}` : ""}
+              {formatMoneyWithSymbol(montoNum, parsed.moneda)}
             </Text>
           </View>
           <Pressable

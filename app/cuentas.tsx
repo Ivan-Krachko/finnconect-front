@@ -17,7 +17,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
-import { formatFiatByCurrency, formatMoneyWithSymbol } from "../src/utils/formatNumber";
+import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
 interface Account {
   id: string;
@@ -60,10 +60,10 @@ function mapApiItemToAccount(item: {
 }
 
 const RECENT_ACTIVITY = [
-  { id: "a1", desc: "Depósito recibido", account: "Cuenta Principal", amount: 350000, date: "Hoy, 10:23", type: "in" as const },
-  { id: "a2", desc: "Transferencia enviada", account: "Cuenta Principal", amount: -45000, date: "Ayer, 16:45", type: "out" as const },
-  { id: "a3", desc: "Compra de dólares", account: "Cuenta Dólares", amount: 500, date: "28 Sept", type: "in" as const },
-  { id: "a4", desc: "Débito automático", account: "Cuenta Principal", amount: -12400, date: "27 Sept", type: "out" as const },
+  { id: "a1", desc: "Depósito recibido", account: "Cuenta Principal", amount: 350000, currency: "ARS" as const, date: "Hoy, 10:23", type: "in" as const },
+  { id: "a2", desc: "Transferencia enviada", account: "Cuenta Principal", amount: -45000, currency: "ARS" as const, date: "Ayer, 16:45", type: "out" as const },
+  { id: "a3", desc: "Compra de dólares", account: "Cuenta Dólares", amount: 500, currency: "USD" as const, date: "28 Sept", type: "in" as const },
+  { id: "a4", desc: "Débito automático", account: "Cuenta Principal", amount: -12400, currency: "ARS" as const, date: "27 Sept", type: "out" as const },
 ];
 
 function fmtMoney(n: number, currency: string) {
@@ -152,9 +152,9 @@ export default function CuentasScreen() {
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         {/* Total */}
         <View style={s.totalCard}>
-          <Text style={s.totalLabel}>Saldo Principal (ARS)</Text>
+          <Text style={s.totalLabel}>Saldo Principal</Text>
           <Text style={s.totalValue}>
-            {formatMoneyWithSymbol(saldoPrincipal, "ARS")}
+            {formatMoneyWithSymbol(saldoPrincipal, "ARS", { showIsoCode: false })}
           </Text>
           <Text style={s.totalSub}>{accounts.length} cuentas activas</Text>
         </View>
@@ -174,7 +174,6 @@ export default function CuentasScreen() {
               </View>
               <View style={s.accRight}>
                 <Text style={s.accBalance}>{fmtMoney(acc.balance, acc.currency)}</Text>
-                <Text style={s.accCurrency}>{acc.currency}</Text>
               </View>
             </View>
 
@@ -228,8 +227,8 @@ export default function CuentasScreen() {
                   <Text style={s.actMeta}>{a.account} · {a.date}</Text>
                 </View>
                 <Text style={[s.actAmount, { color: isIn ? "#4ADE80" : "#EF4444" }]}>
-                  {isIn ? "+" : "-"}$
-                  {formatFiatByCurrency(Math.abs(a.amount), "ARS")}
+                  {isIn ? "+" : "-"}
+                  {formatMoneyWithSymbol(Math.abs(a.amount), a.currency)}
                 </Text>
               </View>
             );
@@ -268,7 +267,6 @@ const s = StyleSheet.create({
   accType: { color: DIM, fontSize: 12 },
   accRight: { alignItems: "flex-end" },
   accBalance: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 2 },
-  accCurrency: { color: DIM, fontSize: 12, fontWeight: "600" },
 
   accDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.05)", marginVertical: 14 },
   accDetail: { gap: 10 },

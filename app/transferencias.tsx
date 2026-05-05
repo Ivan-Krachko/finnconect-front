@@ -16,6 +16,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
+import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 import { parseAmount } from "../src/utils/parseAmount";
 import { formatFiatByCurrency, formatIntegerEsAR } from "../src/utils/formatNumber";
 
@@ -66,7 +67,7 @@ export default function TransferenciasScreen() {
     if (!token) return;
     cuentasService
       .getCuentas(token)
-      .then((data) => setCuentas(data.items || []))
+      .then((data) => setCuentas(filterCuentasBySupportedFiat(data.items || [])))
       .catch(() => setCuentas([]));
   }, [token]);
 

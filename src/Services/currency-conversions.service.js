@@ -34,6 +34,19 @@ export const getConvertRates = async (token, from = "USD", amount = 1) => {
 };
 
 /**
+ * Cotización de divisas fiat vs ARS (u otra moneda `convert`).
+ * GET /currencies/monedas-prices?convert=ars
+ */
+export const getMonedasPrices = async (token, convert = "ars") => {
+  const params = new URLSearchParams({ convert: String(convert).toLowerCase() });
+  const response = await fetch(`${API_HOST}/currencies/monedas-prices?${params}`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  return parseResponse(response);
+};
+
+/**
  * Convierte moneda entre cuentas propias (monedas distintas).
  * POST /currency-conversions
  */

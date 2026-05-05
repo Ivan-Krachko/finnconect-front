@@ -1,14 +1,17 @@
-/**
- * Config dinámica: inyecta apiHost para que la app lo lea en runtime (evita caché de Metro con env).
- * Expo carga .env / .env.local antes de evaluar este archivo.
- */
-const { official } = require("./scripts/api-host-defaults.cjs");
-
+const { API_HOST } = require("./src/config/api");
 module.exports = ({ config }) => ({
   ...config,
+  ios: {
+    ...(config.ios || {}),
+    infoPlist: {
+      ...(config.ios?.infoPlist || {}),
+      NSFaceIDUsageDescription:
+        "FinConnect usa Face ID para iniciar sesión sin escribir la contraseña.",
+    },
+  },
   extra: {
     ...(config.extra || {}),
-    apiHost: process.env.EXPO_PUBLIC_API_HOST || official,
+    apiHost: API_HOST,
     useMock: process.env.EXPO_PUBLIC_USE_MOCK === "1",
   },
 });

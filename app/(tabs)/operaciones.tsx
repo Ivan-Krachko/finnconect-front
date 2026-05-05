@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -20,14 +19,16 @@ import * as cuentasService from "../../src/Services/cuentas.service";
 import * as currencyConversionsService from "../../src/Services/currency-conversions.service";
 import { STOCK_DISPLAY } from "../../src/constants/acciones";
 import { CRYPTO_DISPLAY, CRYPTO_API_MAP } from "../../src/constants/criptomonedas";
+import { FIAT_CURRENCIES_UI, filterCuentasBySupportedFiat } from "../../src/constants/fiat";
 import { parseAmount } from "../../src/utils/parseAmount";
 import {
   formatCryptoQuantityEsAR,
-  formatDecimalEsAR,
   formatFiatByCurrency,
+  formatFiatConversionEsAR,
   formatPercentValueEsAR,
   formatStockSharesEsAR,
 } from "../../src/utils/formatNumber";
+import { AppToast } from "../../src/components/AppToast";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 type TabKey = "divisas" | "cripto" | "acciones";
@@ -61,38 +62,7 @@ interface Stock {
   trend: number;
 }
 
-const CURRENCIES: Currency[] = [
-  { code: "ARS", name: "Peso Argentino", flag: "🇦🇷", rateToArs: 1, trend: 0 },
-  {
-    code: "USD",
-    name: "Dólar Estadounidense",
-    flag: "🇺🇸",
-    rateToArs: 1024,
-    trend: 0.45,
-  },
-  { code: "EUR", name: "Euro", flag: "🇪🇺", rateToArs: 1593, trend: 0.25 },
-  {
-    code: "JPY",
-    name: "Yen Japonés",
-    flag: "🇯🇵",
-    rateToArs: 9.14,
-    trend: -0.12,
-  },
-  {
-    code: "BRL",
-    name: "Real Brasileño",
-    flag: "🇧🇷",
-    rateToArs: 204,
-    trend: 0.18,
-  },
-  {
-    code: "GBP",
-    name: "Libra Esterlina",
-    flag: "🇬🇧",
-    rateToArs: 1850,
-    trend: 0.32,
-  },
-];
+const CURRENCIES: Currency[] = FIAT_CURRENCIES_UI as Currency[];
 
 /** Fallback cuando no hay datos del API */
 const CRYPTOS_FALLBACK: Crypto[] = [
@@ -171,6 +141,12 @@ function normalizeAmountInput(t: string): string {
 /* ── Component ── */
 
 export default function OperacionesScreen() {
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2600);
+  }, []);
+
   const insets = useSafeAreaInsets();
   const { token } = useContext(autenticacionContext);
   const [activeTab, setActiveTab] = useState<TabKey>("divisas");
@@ -240,6 +216,8 @@ export default function OperacionesScreen() {
   const [fxLoading, setFxLoading] = useState(false);
   const [fxSubmitting, setFxSubmitting] = useState(false);
   const [fxError, setFxError] = useState<string | null>(null);
+  /** Divisas populares: mismo origen que el conversor (API), no valores fijos. */
+  const [popularDivisas, setPopularDivisas] = useState<Currency[]>(POPULAR_CURRENCIES);
 
   const fxNumeric = parseAmount(fxAmount);
   const fxReceive = useMemo(() => {
@@ -266,7 +244,7 @@ export default function OperacionesScreen() {
     cuentasService
       .getCuentas(token)
       .then((data) => {
-        const items = data.items ?? data.data ?? [];
+        const items = filterCuentasBySupportedFiat(data.items ?? data.data ?? []);
         setFxCuentas(items);
         if (items.length >= 2) {
           const moneda0 = items[0].moneda;
@@ -278,6 +256,34 @@ export default function OperacionesScreen() {
         }
       })
       .catch(() => setFxCuentas([]));
+  }, [token, activeTab]);
+
+  const refrescarSaldosDivisas = useCallback(() => {
+    if (!token) return;
+    cuentasService
+      .getCuentas(token)
+      .then((data) => {
+        const items = filterCuentasBySupportedFiat(data.items ?? data.data ?? []);
+        setFxCuentas(items);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || activeTab !== "divisas") return;
+    currencyConversionsService
+      .getMonedasPrices(token, "ars")
+      .then((data: { symbol: string; price: number }[]) => {
+        const list = Array.isArray(data) ? data : [];
+        const bySym = new Map(list.map((row) => [String(row.symbol).toUpperCase(), row.price]));
+        setPopularDivisas(
+          POPULAR_CURRENCIES.map((c) => {
+            const p = bySym.get(c.code);
+            return typeof p === "number" && Number.isFinite(p) ? { ...c, rateToArs: p } : c;
+          })
+        );
+      })
+      .catch(() => setPopularDivisas(POPULAR_CURRENCIES));
   }, [token, activeTab]);
 
   useEffect(() => {
@@ -314,9 +320,10 @@ export default function OperacionesScreen() {
         String(fxNumeric)
       );
       setFxAmount("");
-      Alert.alert(
-        "Conversión exitosa",
-        `Recibís ${typeof res.montoDestino === "number" ? formatDecimalEsAR(res.montoDestino, 2, 2) : res.montoDestino} ${fxReceiveCurrency}`
+      refrescarSaldosDivisas();
+      showToast(
+        `Conversión lista: ${typeof res.montoDestino === "number" ? formatFiatConversionEsAR(res.montoDestino, fxReceiveCurrency) : res.montoDestino} ${fxReceiveCurrency}`,
+        "success"
       );
     } catch (e: any) {
       setFxError(e?.message || "No se pudo completar la conversión");
@@ -328,7 +335,7 @@ export default function OperacionesScreen() {
   // Cripto state
   const [cryptoAmount, setCryptoAmount] = useState("");
   const [selectedCrypto, setSelectedCrypto] = useState(0);
-  const [cuentas, setCuentas] = useState<{ id: number; moneda: string; alias: string }[]>([]);
+  const [cuentas, setCuentas] = useState<{ id: number; moneda: string; alias: string; saldo?: string }[]>([]);
   const [cryptoSubmitting, setCryptoSubmitting] = useState(false);
   const activeCrypto = cryptos[Math.min(selectedCrypto, cryptos.length - 1)] ?? CRYPTOS_FALLBACK[0];
 
@@ -336,7 +343,7 @@ export default function OperacionesScreen() {
     if (!token || (activeTab !== "cripto" && activeTab !== "acciones")) return;
     cuentasService
       .getCuentas(token)
-      .then((data) => setCuentas(data.items || []))
+      .then((data) => setCuentas(filterCuentasBySupportedFiat(data.items || [])))
       .catch(() => setCuentas([]));
   }, [token, activeTab]);
 
@@ -397,12 +404,12 @@ export default function OperacionesScreen() {
         cantidadStr
       );
       setCryptoAmount("");
-      Alert.alert(
-        "Operación exitosa",
-        `${cryptoMode === "comprar" ? "Compra" : "Venta"} de ${activeCrypto.code} realizada correctamente.`
+      showToast(
+        `${cryptoMode === "comprar" ? "Compra" : "Venta"} de ${activeCrypto.code} realizada.`,
+        "success"
       );
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "No se pudo completar la operación");
+      showToast(e?.message || "No se pudo completar la operación", "error");
     } finally {
       setCryptoSubmitting(false);
     }
@@ -560,12 +567,12 @@ export default function OperacionesScreen() {
       );
       setStockAmount("");
       await fetchStockHoldings();
-      Alert.alert(
-        "Operación exitosa",
-        `${stockMode === "comprar" ? "Compra" : "Venta"} de ${activeStock.ticker} realizada correctamente.`
+      showToast(
+        `${stockMode === "comprar" ? "Compra" : "Venta"} de ${activeStock.ticker} realizada.`,
+        "success"
       );
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "No se pudo completar la operación");
+      showToast(e?.message || "No se pudo completar la operación", "error");
     } finally {
       setStockSubmitting(false);
     }
@@ -744,7 +751,7 @@ export default function OperacionesScreen() {
                       <ActivityIndicator size="small" color="#1FA774" />
                     ) : (
                       <Text style={s.amountValue} numberOfLines={1} adjustsFontSizeToFit>
-                        {formatFiatByCurrency(fxReceive, fxReceiveCurrency)}
+                        {formatFiatConversionEsAR(fxReceive, fxReceiveCurrency)}
                       </Text>
                     )}
                   </View>
@@ -755,7 +762,7 @@ export default function OperacionesScreen() {
                 <Text style={s.rateText}>
                   Tasa:{" "}
                   <Text style={s.rateHl}>
-                    1 {fxSendCurrency} = {formatFiatByCurrency(fxRate, fxReceiveCurrency)} {fxReceiveCurrency}
+                    1 {fxSendCurrency} = {formatFiatConversionEsAR(fxRate, fxReceiveCurrency)} {fxReceiveCurrency}
                   </Text>
                 </Text>
               )}
@@ -788,7 +795,7 @@ export default function OperacionesScreen() {
 
             <Text style={s.heading}>Divisas Populares</Text>
             <View style={s.grid}>
-              {POPULAR_CURRENCIES.map((c) => {
+              {popularDivisas.map((c) => {
                 const up = c.trend >= 0;
                 return (
                   <View key={c.code} style={s.gridCard}>
@@ -1356,6 +1363,7 @@ export default function OperacionesScreen() {
           </>
         )}
       </ScrollView>
+      <AppToast visible={!!toast} message={toast?.msg ?? ""} type={toast?.type ?? "info"} />
     </View>
   );
 }

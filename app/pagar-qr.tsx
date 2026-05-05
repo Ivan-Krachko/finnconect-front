@@ -18,6 +18,7 @@ import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
 import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { isSupportedFiat, filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
 function parseCobrarQr(data: string): { alias: string; monto: string; moneda: string } | null {
   try {
@@ -81,15 +82,20 @@ export default function PagarQRScreen() {
         setErrorScan("Este código QR no es un cobro de FinConnect.");
         return;
       }
+      if (!isSupportedFiat(parsed.moneda)) {
+        setErrorScan("Esta moneda no está disponible en la app.");
+        return;
+      }
 
       if (!token) return;
       setCargando(true);
       try {
-        const [cuentaDestino, { items: cuentas }] = await Promise.all([
+        const [cuentaDestino, cuentasRes] = await Promise.all([
           cuentasService.searchCuenta(token, parsed.alias),
           cuentasService.getCuentas(token),
         ]);
-        const cuentaOrigen = (cuentas || []).find(
+        const cuentasOrigen = filterCuentasBySupportedFiat(cuentasRes?.items || []);
+        const cuentaOrigen = cuentasOrigen.find(
           (c: { id: number; moneda: string }) =>
             c.moneda === parsed.moneda && c.id !== cuentaDestino.id
         ) as CuentaOrigen | undefined;
@@ -99,7 +105,7 @@ export default function PagarQRScreen() {
           return;
         }
         if (!cuentaOrigen) {
-          const tieneCuentaMismaMoneda = (cuentas || []).some(
+          const tieneCuentaMismaMoneda = cuentasOrigen.some(
             (c: { moneda: string }) => c.moneda === parsed.moneda
           );
           setErrorScan(

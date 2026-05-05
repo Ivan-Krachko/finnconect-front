@@ -18,6 +18,7 @@ import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as tarjetasService from "../src/Services/tarjetas.service";
 import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
 interface Tarjeta {
   id: number;
@@ -42,6 +43,11 @@ const GRADIENTS: [string, string][] = [
   ["#1a1a3e", "#3B82F6"],
   ["#2d1a3e", "#8B5CF6"],
 ];
+
+function formatPanGroups(digits: string): string {
+  const d = digits.replace(/\D/g, "");
+  return d.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+}
 
 export default function TarjetasScreen() {
   const insets = useSafeAreaInsets();
@@ -75,7 +81,7 @@ export default function TarjetasScreen() {
         ...t,
       }));
       setTarjetas(list);
-      setCuentas(cuentasRes.items ?? cuentasRes.data ?? []);
+      setCuentas(filterCuentasBySupportedFiat(cuentasRes.items ?? cuentasRes.data ?? []));
     } catch (e: any) {
       Alert.alert("Error", e?.message || "No se pudieron cargar las tarjetas");
     } finally {
@@ -89,12 +95,19 @@ export default function TarjetasScreen() {
 
   const getCuentaByTarjeta = (cuentaId: number) =>
     cuentas.find((c) => c.id === cuentaId);
+  const tarjetaEsArgentina = (t: Tarjeta) =>
+    getCuentaByTarjeta(t.cuentaId)?.moneda === "ARS";
+  const tarjetasLista = tarjetas.filter(
+    (t) => t.estado !== "cancelada" && tarjetaEsArgentina(t)
+  );
   const getSaldo = (cuentaId: number) => {
     const c = getCuentaByTarjeta(cuentaId);
     return c ? parseFloat(c.saldo) || 0 : 0;
   };
   const cuentasSinTarjeta = cuentas.filter(
-    (c) => !tarjetas.some((t) => t.cuentaId === c.id && t.estado !== "cancelada")
+    (c) =>
+      c.moneda === "ARS" &&
+      !tarjetas.some((t) => t.cuentaId === c.id && t.estado !== "cancelada")
   );
 
   const handleCrear = async (cuentaId: number) => {
@@ -114,25 +127,37 @@ export default function TarjetasScreen() {
   const toggleNumero = async (card: Tarjeta) => {
     const show = !numeroVisible[card.id];
     setNumeroVisible((v) => ({ ...v, [card.id]: show }));
-    if (show && !card.numeroCompleto && token) {
+    if (show && !card.numeroCompleto && !detalleTarjeta[card.id]?.numeroCompleto && token) {
       try {
         const detalle = await tarjetasService.getTarjeta(token, card.id);
-        const num = detalle.numeroCompleto ?? detalle.numero_completo;
+        const num =
+          detalle.numeroCompleto ??
+          detalle.numero_completo ??
+          (typeof detalle.tarjeta === "object" && detalle.tarjeta?.numeroCompleto) ??
+          null;
         if (num) {
-          setDetalleTarjeta((d) => ({ ...d, [card.id]: { ...card, numeroCompleto: num } }));
+          setDetalleTarjeta((d) => ({
+            ...d,
+            [card.id]: { ...card, numeroCompleto: String(num).replace(/\D/g, "") },
+          }));
         }
       } catch {
-        // no se pudo obtener
+        setNumeroVisible((v) => ({ ...v, [card.id]: false }));
       }
     }
   };
 
   const getNumeroDisplay = (card: Tarjeta) => {
-    const full = card.numeroCompleto ?? detalleTarjeta[card.id]?.numeroCompleto;
-    if (numeroVisible[card.id] && full) {
-      return full.replace(/(\d{4})(?=\d)/g, "$1 ");
+    const fullRaw =
+      card.numeroCompleto ?? detalleTarjeta[card.id]?.numeroCompleto ?? "";
+    const full = String(fullRaw).replace(/\D/g, "");
+    if (numeroVisible[card.id] && full.length >= 12) {
+      return formatPanGroups(full);
     }
-    return `**** **** **** ${card.ultimos4}`;
+    if (numeroVisible[card.id] && full.length > 0) {
+      return formatPanGroups(full);
+    }
+    return `•••• •••• •••• ${card.ultimos4}`;
   };
 
   const [detalleAbierto, setDetalleAbierto] = useState<Tarjeta | null>(null);
@@ -150,7 +175,17 @@ export default function TarjetasScreen() {
     if (!token) return;
     try {
       const det = await tarjetasService.getTarjeta(token, card.id);
-      const full = { ...card, ...det };
+      const fullNum =
+        det.numeroCompleto ??
+        det.numero_completo ??
+        (det.tarjeta &&
+          typeof det.tarjeta === "object" &&
+          (det.tarjeta as { numeroCompleto?: string }).numeroCompleto);
+      const full = {
+        ...card,
+        ...det,
+        numeroCompleto: fullNum ? String(fullNum).replace(/\D/g, "") : card.numeroCompleto,
+      };
       setDetalleTarjeta((d) => ({ ...d, [card.id]: full }));
       setDetalleAbierto(full);
     } catch {
@@ -161,11 +196,19 @@ export default function TarjetasScreen() {
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Pressable onPress={() => safeBack(router, "/(tabs)/home")} hitSlop={12}>
+        <Pressable
+          style={s.headerSide}
+          onPress={() => safeBack(router, "/(tabs)/home")}
+          hitSlop={12}
+        >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
-        <Text style={s.headerTitle}>Tarjetas</Text>
+        <View style={s.headerCenter}>
+          <Text style={s.headerTitle}>Tarjetas</Text>
+          <Text style={s.headerHint}>Solo Argentina (ARS)</Text>
+        </View>
         <Pressable
+          style={s.headerSide}
           hitSlop={8}
           onPress={() => setShowCreate(true)}
           disabled={cuentasSinTarjeta.length === 0}
@@ -184,12 +227,12 @@ export default function TarjetasScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-          {tarjetas.filter((t) => t.estado !== "cancelada").length === 0 && !showCreate ? (
+          {tarjetasLista.length === 0 && !showCreate ? (
             <View style={s.emptyState}>
               <Ionicons name="card-outline" size={64} color="rgba(255,255,255,0.3)" />
-              <Text style={s.emptyTitle}>No tenés tarjetas</Text>
+              <Text style={s.emptyTitle}>No tenés tarjetas en pesos</Text>
               <Text style={s.emptySub}>
-                Creá una tarjeta virtual desde una de tus cuentas
+                Las tarjetas virtuales se emiten solo sobre cuentas en pesos argentinos
               </Text>
               {cuentasSinTarjeta.length > 0 && (
                 <Pressable style={s.emptyBtn} onPress={() => setShowCreate(true)}>
@@ -199,9 +242,7 @@ export default function TarjetasScreen() {
             </View>
           ) : (
             <>
-              {tarjetas
-                .filter((t) => t.estado !== "cancelada")
-                .map((card, idx) => {
+              {tarjetasLista.map((card, idx) => {
                   const gradient = GRADIENTS[idx % GRADIENTS.length];
                   const saldo = getSaldo(card.cuentaId);
                   const isBlocked = card.estado === "bloqueada";
@@ -229,7 +270,7 @@ export default function TarjetasScreen() {
                         </Text>
                       </View>
                       <View style={s.cardNumberRow}>
-                        <Text style={s.cardNumber}> {getNumeroDisplay(card)}</Text>
+                        <Text style={s.cardNumber}>{getNumeroDisplay(card)}</Text>
                         <Pressable
                           onPress={() => toggleNumero(card)}
                           hitSlop={12}
@@ -275,12 +316,18 @@ export default function TarjetasScreen() {
                 { key: "Estado", val: detalleAbierto.estado },
                 { key: "CVV", val: detalleAbierto.cvv ?? detalleAbierto.CVV ?? "—" },
                 { key: "Vencimiento", val: detalleAbierto.vencimiento ?? detalleAbierto.fechaVencimiento ?? detalleAbierto.expiry ?? "—" },
-              ].map(({ key, val }) => (
+              ].map(({ key, val }) => {
+                const raw = val ?? "—";
+                const display =
+                  key === "Número" && raw !== "—" && String(raw).replace(/\D/g, "").length >= 12
+                    ? formatPanGroups(String(raw))
+                    : String(raw);
+                return (
                 <View key={key} style={s.detalleRow}>
                   <Text style={s.detalleKey}>{key}</Text>
-                  <Text style={s.detalleVal}>{String(val ?? "—")}</Text>
+                  <Text style={s.detalleVal}>{display}</Text>
                 </View>
-              ))}
+              );})}
             </View>
             <Pressable style={s.modalCancel} onPress={() => setDetalleAbierto(null)}>
               <Text style={s.modalCancelText}>Cerrar</Text>
@@ -294,7 +341,7 @@ export default function TarjetasScreen() {
           <View style={s.modal}>
             <Text style={s.modalTitle}>Crear tarjeta virtual</Text>
             <Text style={s.modalSub}>
-              Elegí la cuenta desde la que se debitarán los pagos
+              Solo cuentas en pesos argentinos (ARS)
             </Text>
             {cuentasSinTarjeta.map((c) => (
               <Pressable
@@ -345,10 +392,13 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     paddingVertical: 14,
   },
+  headerSide: { width: 44, alignItems: "center", justifyContent: "center" },
+  headerCenter: { flex: 1, alignItems: "center" },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  headerHint: { color: DIM, fontSize: 11, fontWeight: "600", marginTop: 2 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
 

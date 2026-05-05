@@ -6,10 +6,8 @@
  *   npm run mock
  *
  * Emulador Android (localhost del host):
- *   MOCK_API_HOST=http://10.0.2.2:3000 npm run mock
  *
  * Teléfono en la misma red:
- *   MOCK_API_HOST=http://192.168.0.10:3000 npm run mock
  */
 
 const fs = require("fs");

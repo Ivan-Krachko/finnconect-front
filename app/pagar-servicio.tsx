@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useContext, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +17,8 @@ import * as cuentasService from "../src/Services/cuentas.service";
 import * as facturasService from "../src/Services/facturas.service";
 import * as pagosServiciosService from "../src/Services/pagos-servicios.service";
 import { formatFiatByCurrency } from "../src/utils/formatNumber";
+import { AppToast } from "../src/components/AppToast";
+import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 
 interface Factura {
   id: number;
@@ -34,14 +35,43 @@ interface Cuenta {
   saldo: string;
 }
 
+function norm(s: string | undefined): string {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function montoFactura(f: Factura): number {
+  return typeof f.monto === "string" ? parseFloat(f.monto) : (f.monto ?? 0);
+}
+
 export default function PagarServicioScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    monto?: string;
+    ente?: string;
+    nombreEnte?: string;
+    referencia?: string;
+  }>();
   const { token } = useContext(autenticacionContext);
   const [facturas, setFacturas] = useState<Factura[]>([]);
   const [cuentas, setCuentas] = useState<Cuenta[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagando, setPagando] = useState<number | null>(null);
+  const [pagandoEscaneo, setPagandoEscaneo] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2600);
+  }, []);
+  const montoEscaneado = params.monto ? parseFloat(String(params.monto)) : NaN;
+  const nombreEnteEscaneado = norm(params.nombreEnte ? String(params.nombreEnte) : "");
+  const refEscaneada = norm(params.referencia ? String(params.referencia) : "");
+  const vinoDesdeEscaneo =
+    !!nombreEnteEscaneado || Number.isFinite(montoEscaneado) || !!refEscaneada;
 
   const fetchData = useCallback(async () => {
     if (!token) return;
@@ -52,17 +82,37 @@ export default function PagarServicioScreen() {
         cuentasService.getCuentas(token),
       ]);
       setFacturas(facturasRes.items || []);
-      setCuentas(cuentasRes.items || []);
+      setCuentas(filterCuentasBySupportedFiat(cuentasRes.items || []));
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "No se pudieron cargar los datos");
+      showToast(e?.message || "No se pudieron cargar los datos", "error");
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [showToast, token]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const facturasOrdenadas = [...facturas].sort((a, b) => {
+    const aMonto = montoFactura(a);
+    const bMonto = montoFactura(b);
+    const aNombre = norm(String(a.descripcion || a.nombre || ""));
+    const bNombre = norm(String(b.descripcion || b.nombre || ""));
+    const aRef = norm(String(a.referencia || ""));
+    const bRef = norm(String(b.referencia || ""));
+    const aMatchNombre =
+      !!nombreEnteEscaneado && (aNombre.includes(nombreEnteEscaneado) || nombreEnteEscaneado.includes(aNombre));
+    const bMatchNombre =
+      !!nombreEnteEscaneado && (bNombre.includes(nombreEnteEscaneado) || nombreEnteEscaneado.includes(bNombre));
+    const aMatchRef = !!refEscaneada && aRef.length > 0 && aRef.includes(refEscaneada);
+    const bMatchRef = !!refEscaneada && bRef.length > 0 && bRef.includes(refEscaneada);
+    const aMatchMonto = Number.isFinite(montoEscaneado) && Math.abs(aMonto - montoEscaneado) < 0.01;
+    const bMatchMonto = Number.isFinite(montoEscaneado) && Math.abs(bMonto - montoEscaneado) < 0.01;
+    const aScore = Number(aMatchRef) * 3 + Number(aMatchNombre) * 2 + Number(aMatchMonto);
+    const bScore = Number(bMatchRef) * 3 + Number(bMatchNombre) * 2 + Number(bMatchMonto);
+    return bScore - aScore;
+  });
 
   const handlePagar = async (factura: Factura, cuentaId: number) => {
     if (!token) return;
@@ -70,20 +120,50 @@ export default function PagarServicioScreen() {
     const cuenta = cuentas.find((c) => c.id === cuentaId);
     const saldo = cuenta ? parseFloat(cuenta.saldo) || 0 : 0;
     if (saldo < monto) {
-      Alert.alert("Saldo insuficiente", "La cuenta no tiene suficiente saldo para pagar esta factura.");
+      showToast("La cuenta no tiene saldo suficiente para pagar esta factura.", "error");
       return;
     }
     setPagando(factura.id);
     try {
       await pagosServiciosService.pagarFactura(token, factura.id, cuentaId);
-      Alert.alert("Listo", "Factura pagada correctamente", [
-        { text: "OK", onPress: () => safeBack(router, "/(tabs)/pagos") },
-      ]);
+      showToast("Pago exitoso.", "success");
+      setTimeout(() => safeBack(router, "/(tabs)/pagos"), 900);
       await fetchData();
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "No se pudo pagar la factura");
+      showToast(e?.message || "No se pudo pagar la factura", "error");
     } finally {
       setPagando(null);
+    }
+  };
+
+  const handlePagarEscaneado = async (cuentaId: number) => {
+    if (!token) return;
+    if (!Number.isFinite(montoEscaneado) || montoEscaneado <= 0) {
+      showToast("No se pudo leer un monto válido del código escaneado.", "error");
+      return;
+    }
+    const cuenta = cuentas.find((c) => c.id === cuentaId);
+    const saldo = cuenta ? parseFloat(cuenta.saldo) || 0 : 0;
+    if (saldo < montoEscaneado) {
+      showToast("La cuenta no tiene saldo suficiente para pagar este cupon.", "error");
+      return;
+    }
+
+    setPagandoEscaneo(true);
+    try {
+      await pagosServiciosService.pagarFactura(token, null, cuentaId, {
+        codigoEnte: params.ente ? String(params.ente) : undefined,
+        nombreEnte: params.nombreEnte ? String(params.nombreEnte) : undefined,
+        referencia: params.referencia ? String(params.referencia) : undefined,
+        monto: montoEscaneado,
+      });
+      showToast("Pago exitoso del cupon.", "success");
+      setTimeout(() => safeBack(router, "/(tabs)/pagos"), 900);
+      await fetchData();
+    } catch (e: any) {
+      showToast(e?.message || "No se pudo pagar el cupón escaneado", "error");
+    } finally {
+      setPagandoEscaneo(false);
     }
   };
 
@@ -111,13 +191,55 @@ export default function PagarServicioScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+          {vinoDesdeEscaneo && (
+            <View style={s.scanHintCard}>
+              <Text style={s.scanHintTitle}>Datos detectados del código</Text>
+              {!!params.nombreEnte && <Text style={s.scanHintText}>Empresa: {String(params.nombreEnte)}</Text>}
+              {Number.isFinite(montoEscaneado) && (
+                <Text style={s.scanHintText}>Monto: ${formatFiatByCurrency(montoEscaneado, "ARS")}</Text>
+              )}
+              {Number.isFinite(montoEscaneado) && cuentas.length > 0 && (
+                <View style={s.scanPayWrap}>
+                  <Text style={s.cuentaLabel}>Pagar cupón escaneado desde</Text>
+                  {cuentas
+                    .filter((c) => (parseFloat(c.saldo) || 0) >= montoEscaneado)
+                    .map((c) => (
+                      <Pressable
+                        key={`scan-${c.id}`}
+                        style={s.cuentaOption}
+                        onPress={() => handlePagarEscaneado(c.id)}
+                        disabled={pagandoEscaneo}
+                      >
+                        <Text style={s.cuentaOptionText}>
+                          {c.alias} · {c.moneda}
+                        </Text>
+                        <Text style={s.cuentaOptionSaldo}>
+                          ${formatFiatByCurrency(parseFloat(c.saldo) || 0, c.moneda)}
+                        </Text>
+                        {pagandoEscaneo ? (
+                          <ActivityIndicator size="small" color="#1FA774" />
+                        ) : (
+                          <Ionicons name="arrow-forward" size={20} color="#1FA774" />
+                        )}
+                      </Pressable>
+                    ))}
+                </View>
+              )}
+            </View>
+          )}
           <Text style={s.sectionTitle}>Facturas pendientes</Text>
-          {facturas.map((f) => {
-            const monto = typeof f.monto === "string" ? parseFloat(f.monto) : (f.monto ?? 0);
+          {facturasOrdenadas.map((f) => {
+            const monto = montoFactura(f);
             const desc = f.descripcion || f.nombre || `Factura #${f.id}`;
             const cuentasConSaldo = cuentas.filter(
               (c) => (parseFloat(c.saldo) || 0) >= monto
             );
+            const matchMonto =
+              Number.isFinite(montoEscaneado) && Math.abs(monto - montoEscaneado) < 0.01;
+            const matchNombre =
+              !!nombreEnteEscaneado &&
+              norm(String(desc)).includes(nombreEnteEscaneado);
+            const esSugerida = vinoDesdeEscaneo && (matchMonto || matchNombre);
 
             return (
               <View key={f.id} style={s.facturaCard}>
@@ -128,6 +250,7 @@ export default function PagarServicioScreen() {
                   <View style={s.facturaInfo}>
                     <Text style={s.facturaDesc}>{desc}</Text>
                     <Text style={s.facturaMonto}>${formatFiatByCurrency(monto, "ARS")}</Text>
+                    {esSugerida && <Text style={s.sugerida}>Sugerida por escaneo</Text>}
                   </View>
                 </View>
                 <Text style={s.cuentaLabel}>Pagar desde</Text>
@@ -162,6 +285,7 @@ export default function PagarServicioScreen() {
           })}
         </ScrollView>
       )}
+      <AppToast visible={!!toast} message={toast?.msg ?? ""} type={toast?.type ?? "info"} />
     </View>
   );
 }
@@ -214,6 +338,17 @@ const s = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 16,
   },
+  scanHintCard: {
+    backgroundColor: "rgba(31,167,116,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(31,167,116,0.3)",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  scanHintTitle: { color: "#B7F7DD", fontSize: 13, fontWeight: "700", marginBottom: 4 },
+  scanHintText: { color: "#E8FFF4", fontSize: 12 },
+  scanPayWrap: { marginTop: 10 },
   facturaCard: {
     backgroundColor: CARD_BG,
     borderRadius: 20,
@@ -240,6 +375,7 @@ const s = StyleSheet.create({
   facturaInfo: { flex: 1 },
   facturaDesc: { color: "#fff", fontSize: 16, fontWeight: "700", marginBottom: 4 },
   facturaMonto: { color: "#1FA774", fontSize: 20, fontWeight: "800" },
+  sugerida: { color: "#86EFAC", fontSize: 12, fontWeight: "700", marginTop: 4 },
   cuentaLabel: {
     color: DIM,
     fontSize: 12,

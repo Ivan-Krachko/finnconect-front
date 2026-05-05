@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { useCallback, useContext, useMemo, useState } from "react";
 import {
   Alert,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -16,8 +17,23 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../../src/context/AutenticacionContext";
+import {
+  clearBiometricLoginCredentials,
+  getBiometricLoginShortLabel,
+  isBiometricLoginConfigured,
+} from "../../src/Services/biometricLogin.service";
 import { getMe } from "../../src/Services/usuarios.service";
 import * as telegramIaService from "../../src/Services/telegram-ia.service";
+
+const TELEGRAM_BOT_USERNAME = "finconnectutn_bot";
+/** Formato que espera el bot (placeholders). */
+const TELEGRAM_LOGIN_TEMPLATE = "/login {codigo} {dni}";
+
+function buildTelegramPrefill(code: string, dniProfile: string): string | null {
+  const dniDigits = dniProfile.replace(/\D/g, "");
+  if (!dniDigits || dniProfile === "—") return null;
+  return `/login ${code} ${dniDigits}`;
+}
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -33,6 +49,7 @@ interface SettingRow {
   acerca?: boolean;
   /** Acción especial (no navega) */
   telegramIaCode?: boolean;
+  biometricSettings?: boolean;
 }
 
 interface SettingSection {
@@ -68,6 +85,13 @@ const STATIC_SECTIONS: SettingSection[] = [
         value: "Cambiar",
         type: "nav",
         href: "/cambiar-contrasena",
+      },
+      {
+        icon: "finger-print-outline",
+        label: "Ingreso con Face ID / huella",
+        value: "",
+        type: "info",
+        biometricSettings: true,
       },
       {
         icon: "time-outline",
@@ -147,6 +171,8 @@ export default function PerfilScreen() {
     expiresAt: string;
   } | null>(null);
   const [tgCopied, setTgCopied] = useState(false);
+  const [bioConfigured, setBioConfigured] = useState(false);
+  const [bioShort, setBioShort] = useState("Biometría");
 
   const loadPerfil = useCallback(() => {
     if (!sessionReady) return;
@@ -180,6 +206,18 @@ export default function PerfilScreen() {
   useFocusEffect(
     useCallback(() => {
       loadPerfil();
+      void (async () => {
+        try {
+          const [c, l] = await Promise.all([
+            isBiometricLoginConfigured(),
+            getBiometricLoginShortLabel(),
+          ]);
+          setBioConfigured(c);
+          setBioShort(l);
+        } catch {
+          setBioConfigured(false);
+        }
+      })();
     }, [loadPerfil])
   );
 
@@ -197,10 +235,42 @@ export default function PerfilScreen() {
         if (row.label === "DNI") row.value = dni;
       }
     }
+    const seguridad = copy.find((s) => s.title === "Ajustes de Seguridad");
+    if (seguridad) {
+      for (const row of seguridad.rows) {
+        if (row.biometricSettings) {
+          row.value = bioConfigured ? `Activado (${bioShort})` : "Desactivado";
+        }
+      }
+    }
     return copy;
-  }, [nombreCompleto, email, dni]);
+  }, [nombreCompleto, email, dni, bioConfigured, bioShort]);
 
   const onRowPress = (row: SettingRow) => {
+    if (row.biometricSettings) {
+      if (!bioConfigured) {
+        Alert.alert(
+          "Ingreso biométrico",
+          "Activá esta opción iniciando sesión con email y contraseña: después del ingreso te vamos a ofrecer usar Face ID o huella."
+        );
+        return;
+      }
+      Alert.alert(
+        "Quitar ingreso biométrico",
+        "Vas a volver a ingresar siempre con la contraseña (podés reactivarlo después).",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Quitar",
+            style: "destructive",
+            onPress: () => {
+              void clearBiometricLoginCredentials().then(() => setBioConfigured(false));
+            },
+          },
+        ]
+      );
+      return;
+    }
     if (row.telegramIaCode) {
       if (!sessionReady || !token) {
         Alert.alert("Sesión", "Iniciá sesión para generar un código.");
@@ -245,7 +315,9 @@ export default function PerfilScreen() {
 
   const copyTelegramCode = async () => {
     if (!tgModal) return;
-    await Clipboard.setStringAsync(tgModal.code);
+    const full = buildTelegramPrefill(tgModal.code, dni);
+    const toCopy = full ?? tgModal.code;
+    await Clipboard.setStringAsync(toCopy);
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
@@ -253,7 +325,40 @@ export default function PerfilScreen() {
     }
     setTgCopied(true);
     setTimeout(() => setTgCopied(false), 2200);
+    if (!full) {
+      Alert.alert(
+        "Solo código copiado",
+        `El mensaje completo es «${TELEGRAM_LOGIN_TEMPLATE}». Cargá tu DNI en datos personales para copiar la línea entera o completá el DNI a mano.`
+      );
+    }
   };
+
+  const openTelegramLogin = async () => {
+    if (!tgModal) return;
+    const message = buildTelegramPrefill(tgModal.code, dni);
+    if (!message) {
+      Alert.alert(
+        "Falta el DNI",
+        "No pudimos armar /login {codigo} {dni} sin tu DNI. Cargalo en datos personales o copiá el mensaje y completalo a mano en Telegram."
+      );
+      return;
+    }
+    const url = `https://t.me/${TELEGRAM_BOT_USERNAME}?text=${encodeURIComponent(message)}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        "Telegram",
+        "No se pudo abrir el enlace. Instalá Telegram o copiá el comando y escribí en @finconnectutn_bot:\n" +
+          message
+      );
+    }
+  };
+
+  const telegramPrefill = useMemo(() => {
+    if (!tgModal) return null;
+    return buildTelegramPrefill(tgModal.code, dni);
+  }, [tgModal, dni]);
 
   const tgExpiresLabel = tgModal?.expiresAt
     ? new Date(tgModal.expiresAt).toLocaleString("es-AR", {
@@ -364,6 +469,29 @@ export default function PerfilScreen() {
                   </Text>
                 </View>
 
+                <Text style={s.tgLabel}>Mensaje predeterminado</Text>
+                <View style={s.tgCommandWrap}>
+                  <Text style={s.tgCommandMono} selectable>
+                    {TELEGRAM_LOGIN_TEMPLATE}
+                  </Text>
+                </View>
+
+                {telegramPrefill ? (
+                  <>
+                    <Text style={s.tgLabelSecondary}>Así queda con tus datos</Text>
+                    <View style={s.tgCommandWrap}>
+                      <Text style={s.tgCommandMonoLive} selectable>
+                        {telegramPrefill}
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={s.tgCommandWarn}>
+                    Cargá tu DNI en datos personales para rellenar{" "}
+                    <Text style={s.tgHintMono}>{"{dni}"}</Text> en el mensaje.
+                  </Text>
+                )}
+
                 {tgExpiresLabel ? (
                   <Text style={s.tgExpiry}>
                     <Text style={s.tgExpiryMuted}>Vence el </Text>
@@ -372,9 +500,11 @@ export default function PerfilScreen() {
                 ) : null}
 
                 <Text style={s.tgHint}>
-                  En Telegram usá{" "}
-                  <Text style={s.tgHintMono}>/login</Text> con este código y tu
-                  DNI, o enviá una línea: código + espacio + DNI.
+                  En <Text style={s.tgHintMono}>@{TELEGRAM_BOT_USERNAME}</Text> el
+                  bot espera{" "}
+                  <Text style={s.tgHintMono}>{TELEGRAM_LOGIN_TEMPLATE}</Text> (código
+                  de un solo uso + tu DNI). «Abrir telegram» prepara esa línea para
+                  enviar.
                 </Text>
 
                 <Pressable
@@ -393,8 +523,23 @@ export default function PerfilScreen() {
                   <Text
                     style={[s.tgCopyBtnText, tgCopied && s.tgCopyBtnTextDone]}
                   >
-                    {tgCopied ? "Copiado al portapapeles" : "Copiar código"}
+                    {tgCopied
+                      ? "Copiado al portapapeles"
+                      : telegramPrefill
+                        ? "Copiar mensaje /login"
+                        : "Copiar código"}
                   </Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    s.tgTelegramBtn,
+                    pressed && s.tgTelegramBtnPressed,
+                  ]}
+                  onPress={() => void openTelegramLogin()}
+                >
+                  <Ionicons name="paper-plane-outline" size={20} color="#fff" />
+                  <Text style={s.tgTelegramBtnText}>Abrir telegram</Text>
                 </Pressable>
 
                 <Pressable
@@ -606,6 +751,48 @@ const s = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 10,
   },
+  tgLabelSecondary: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  tgCommandWrap: {
+    backgroundColor: "rgba(0,0,0,0.28)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  tgCommandMono: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
+    ...(Platform.OS === "ios"
+      ? { fontFamily: "Menlo" }
+      : { fontFamily: "monospace" }),
+  },
+  tgCommandMonoLive: {
+    color: "#A7F3D0",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+    ...(Platform.OS === "ios"
+      ? { fontFamily: "Menlo" }
+      : { fontFamily: "monospace" }),
+  },
+  tgCommandWarn: {
+    color: "rgba(251,191,36,0.95)",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 14,
+    textAlign: "center",
+  },
   tgCodeWrap: {
     backgroundColor: "rgba(0,0,0,0.35)",
     borderRadius: 16,
@@ -673,6 +860,26 @@ const s = StyleSheet.create({
   },
   tgCopyBtnTextDone: {
     color: "#34D399",
+  },
+  tgTelegramBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#0088cc",
+    borderRadius: 16,
+    paddingVertical: 15,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  tgTelegramBtnPressed: {
+    opacity: 0.9,
+  },
+  tgTelegramBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
   },
   tgDoneBtn: {
     alignItems: "center",

@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { useContext, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -11,9 +12,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Clipboard from "expo-clipboard";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
+import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 import { formatFiatByCurrency, formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
 interface Account {
@@ -22,7 +25,7 @@ interface Account {
   type: string;
   currency: string;
   balance: number;
-  cbu: string;
+  cvu: string;
   alias: string;
   icon: string;
   color: string;
@@ -49,7 +52,7 @@ function mapApiItemToAccount(item: {
     type: "Caja de Ahorro",
     currency: item.moneda,
     balance: parseFloat(item.saldo) || 0,
-    cbu: item.cvu,
+    cvu: item.cvu ?? "",
     alias: item.alias,
     icon: cfg.icon,
     color: cfg.color,
@@ -65,6 +68,12 @@ const RECENT_ACTIVITY = [
 
 function fmtMoney(n: number, currency: string) {
   return formatMoneyWithSymbol(n, currency);
+}
+
+function maskCvu(cvu: string): string {
+  const s = String(cvu ?? "").replace(/\s/g, "");
+  if (s.length <= 12) return s || "—";
+  return `${s.slice(0, 8)}…${s.slice(-4)}`;
 }
 
 export default function CuentasScreen() {
@@ -84,12 +93,26 @@ export default function CuentasScreen() {
     cuentasService
       .getCuentas(token)
       .then((data) => {
-        setAccounts((data.items || []).map(mapApiItemToAccount));
+        setAccounts(filterCuentasBySupportedFiat(data.items || []).map(mapApiItemToAccount));
         setError(null);
       })
       .catch((e) => setError(e.message || "Error al cargar cuentas"))
       .finally(() => setLoading(false));
   }, [token]);
+
+  const copiarAlPortapapeles = async (etiqueta: string, valor: string) => {
+    const v = String(valor ?? "").trim();
+    if (!v) {
+      Alert.alert("Sin datos", `No hay ${etiqueta} para copiar.`);
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(v);
+      Alert.alert("Copiado", `${etiqueta} copiado al portapapeles.`);
+    } catch {
+      Alert.alert("Error", "No se pudo copiar. Probá de nuevo.");
+    }
+  };
 
   const saldoPrincipal = accounts
     .filter((a) => a.currency === "ARS")
@@ -160,17 +183,31 @@ export default function CuentasScreen() {
             <View style={s.accDetail}>
               <View style={s.accDetailRow}>
                 <Text style={s.accDetailLabel}>Alias</Text>
-                <View style={s.copyRow}>
-                  <Text style={s.accDetailValue}>{acc.alias}</Text>
-                  <Ionicons name="copy-outline" size={14} color="rgba(255,255,255,0.3)" />
-                </View>
+                <Pressable
+                  style={s.copyRow}
+                  onPress={() => void copiarAlPortapapeles("El alias", acc.alias)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Copiar alias"
+                >
+                  <Text style={s.accDetailValue} numberOfLines={1} selectable={false}>
+                    {acc.alias}
+                  </Text>
+                  <Ionicons name="copy-outline" size={16} color="#1FA774" />
+                </Pressable>
               </View>
               <View style={s.accDetailRow}>
-                <Text style={s.accDetailLabel}>CBU</Text>
-                <View style={s.copyRow}>
-                  <Text style={s.accDetailValue}>{acc.cbu.slice(0, 8)}...{acc.cbu.slice(-4)}</Text>
-                  <Ionicons name="copy-outline" size={14} color="rgba(255,255,255,0.3)" />
-                </View>
+                <Text style={s.accDetailLabel}>CVU</Text>
+                <Pressable
+                  style={s.copyRow}
+                  onPress={() => void copiarAlPortapapeles("El CVU", acc.cvu)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Copiar CVU"
+                >
+                  <Text style={s.accDetailValue} numberOfLines={1} selectable={false}>
+                    {maskCvu(acc.cvu)}
+                  </Text>
+                  <Ionicons name="copy-outline" size={16} color="#1FA774" />
+                </Pressable>
               </View>
             </View>
           </View>

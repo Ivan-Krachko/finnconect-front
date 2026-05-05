@@ -50,7 +50,5 @@ export const CONVERT_OPTIONS = [
   { code: "ars", label: "ARS" },
   { code: "usd", label: "USD" },
   { code: "eur", label: "EUR" },
-  { code: "jpy", label: "JPY" },
   { code: "brl", label: "BRL" },
-  { code: "gbp", label: "GBP" },
 ];

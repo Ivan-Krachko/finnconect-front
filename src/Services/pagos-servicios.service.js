@@ -49,14 +49,20 @@ export const getPagoServicio = async (token, id) => {
   return parseResponse(response);
 };
 
-export const pagarFactura = async (token, facturaId, cuentaId) => {
+export const pagarFactura = async (token, facturaId, cuentaId, barcode) => {
+  const body = {
+    cuentaId: Number(cuentaId),
+  };
+  if (facturaId != null) {
+    body.facturaId = Number(facturaId);
+  }
+  if (barcode) {
+    body.barcode = barcode;
+  }
   const response = await fetch(`${API_HOST}/pagos-servicios`, {
     method: "POST",
     headers: headers(token),
-    body: JSON.stringify({
-      facturaId: Number(facturaId),
-      cuentaId: Number(cuentaId),
-    }),
+    body: JSON.stringify(body),
   });
   return parseResponse(response);
 };

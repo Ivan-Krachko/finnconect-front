@@ -44,17 +44,37 @@ export function formatArsPesoEsAR(n: number): string {
 }
 
 /**
- * Fiat según ISO: ARS/BRL con 2 decimales; JPY entero; resto 2 decimales.
+ * Fiat según ISO: ARS/BRL con 2 decimales; resto 2 decimales.
  */
 export function formatFiatByCurrency(n: number, code: string): string {
   if (!ok(n)) return "—";
   const c = code.toUpperCase();
-  if (c === "JPY") return formatIntegerEsAR(Math.round(n));
   if (c === "ARS" || c === "BRL") {
     const r = Math.round(n * 100) / 100;
     return formatDecimalEsAR(r, 2, 2);
   }
   return formatDecimalEsAR(n, 2, 2);
+}
+
+/**
+ * Montos en conversión / cotización: si la moneda de destino es mucho más “cara”,
+ * el valor puede ser &lt; 0,01 y con 2 decimales se ve 0,00. Subimos decimales según magnitud.
+ */
+export function formatFiatConversionEsAR(n: number, code: string): string {
+  if (!ok(n)) return "—";
+  const c = code.toUpperCase();
+  const abs = Math.abs(n);
+  const maxF = abs === 0 ? 2 : abs < 0.01 ? 8 : abs < 1 ? 6 : 2;
+
+  if (c === "ARS" || c === "BRL") {
+    if (abs >= 1) {
+      const r = Math.round(n * 100) / 100;
+      return formatDecimalEsAR(r, 2, 2);
+    }
+    return formatEsAR(n, { minimumFractionDigits: 0, maximumFractionDigits: maxF });
+  }
+
+  return formatEsAR(n, { minimumFractionDigits: 0, maximumFractionDigits: maxF });
 }
 
 /** Saldo con prefijo ($ / US$ / €). */

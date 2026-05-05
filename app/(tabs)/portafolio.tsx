@@ -21,6 +21,7 @@ import {
   CRYPTO_DISPLAY,
   CRYPTO_API_TO_CODE,
 } from "../../src/constants/criptomonedas";
+import { filterCuentasBySupportedFiat } from "../../src/constants/fiat";
 import { STOCK_DISPLAY, TIPO_ACCION_TO_SYMBOL } from "../../src/constants/acciones";
 import {
   formatArsPesoEsAR,
@@ -166,7 +167,7 @@ export default function PortafolioScreen() {
         accionesService.getPreciosAcciones(token, "ars"),
       ]);
 
-      const cuentasItems = cuentasRes.items || [];
+      const cuentasItems = filterCuentasBySupportedFiat(cuentasRes.items || []);
       const rows: AssetRow[] = [];
 
       let fiatArs = 0;

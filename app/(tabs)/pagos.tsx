@@ -56,17 +56,11 @@ const QUICK_ACTIONS: QuickAction[] = [
     route: "/cobrar-qr",
   },
   {
-    icon: "flash",
-    label: "Pagar Servicio",
+    icon: "barcode-outline",
+    label: "Escanear código de barras",
     color: "#1FA774",
     bg: "rgba(31,167,116,0.15)",
-    route: "/pagar-servicio",
-  },
-  {
-    icon: "cube-outline",
-    label: "Pagar con NFT",
-    color: "#8B5CF6",
-    bg: "rgba(139,92,246,0.15)",
+    route: "/escanear-barras",
   },
 ];
 

@@ -15,6 +15,7 @@ import { autenticacionContext } from "../src/context/AutenticacionContext";
 import { safeBack } from "../src/utils/navigation";
 import * as cuentasService from "../src/Services/cuentas.service";
 import * as transferenciasService from "../src/Services/transferencias.service";
+import { filterCuentasBySupportedFiat } from "../src/constants/fiat";
 import { parseAmount } from "../src/utils/parseAmount";
 import { formatMoneyWithSymbol } from "../src/utils/formatNumber";
 
@@ -49,11 +50,16 @@ export default function CobrarQRScreen() {
     cuentasService
       .getCuentas(token)
       .then((data) => {
-        const items = data.items || [];
+        const items = filterCuentasBySupportedFiat(data.items || []);
         setCuentas(items);
-        if (items.length > 0 && !selectedCuenta) {
-          const ars = items.find((c: Cuenta) => c.moneda === "ARS") ?? items[0];
-          setSelectedCuenta(ars);
+        if (items.length > 0) {
+          setSelectedCuenta((prev) =>
+            prev && items.some((c) => c.id === prev.id)
+              ? prev
+              : items.find((c: Cuenta) => c.moneda === "ARS") ?? items[0]
+          );
+        } else {
+          setSelectedCuenta(null);
         }
       })
       .catch(() => setCuentas([]));

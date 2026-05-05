@@ -3,7 +3,7 @@ import { API_HOST } from "../config/api";
 /**
  * Obtiene los precios actuales de las criptomonedas soportadas.
  * @param {string} token - JWT de autenticación
- * @param {string} [convert='ars'] - Moneda para expresar precios: ars, eur, usd, jpy, brl, gbp (case insensitive)
+ * @param {string} [convert='ars'] - Moneda para expresar precios: ars, eur, usd, brl (case insensitive)
  * @returns {Promise<Array>} Lista de criptomonedas con precio, percentChange24h, etc.
  */
 export const getPreciosCriptomonedas = async (token, convert = "ars") => {

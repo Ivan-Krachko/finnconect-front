@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,51 @@ import {
   View,
 } from "react-native";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import {
+  biometricLoginSupportedPlatform,
+  isBiometricAuthAvailable,
+  isBiometricLoginConfigured,
+  saveCredentialsForBiometricLogin,
+  unlockSavedCredentialsWithBiometrics,
+} from "../src/Services/biometricLogin.service";
+
+function offerEnableBiometricAfterPasswordLogin(email: string, password: string) {
+  if (!biometricLoginSupportedPlatform()) return;
+  void (async () => {
+    try {
+      const hardwareOk = await isBiometricAuthAvailable();
+      if (!hardwareOk) return;
+      const already = await isBiometricLoginConfigured();
+      if (already) return;
+      Alert.alert(
+        "Inicio rápido",
+        "¿Querés usar el login del celular (huella, Face ID o código) la próxima vez para entrar sin escribir la contraseña de la app?",
+        [
+          { text: "Ahora no", style: "cancel", onPress: () => {} },
+          {
+            text: "Sí, activar",
+            onPress: async () => {
+              try {
+                await saveCredentialsForBiometricLogin(email, password);
+                Alert.alert(
+                  "Listo",
+                  "La próxima vez podés tocar «Ingresar con login del celular» en el inicio."
+                );
+              } catch (e: unknown) {
+                Alert.alert(
+                  "No se pudo guardar",
+                  e instanceof Error ? e.message : "Intentá de nuevo más tarde."
+                );
+              }
+            },
+          },
+        ]
+      );
+    } catch {
+      /* ignorar: no bloquear ingreso */
+    }
+  })();
+}
 
 export default function Login() {
   const router = useRouter();
@@ -23,6 +69,28 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [secureText, setSecureText] = useState(true);
+  const [bioShowButton, setBioShowButton] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (Platform.OS === "web") return;
+      try {
+        const [avail, configured] = await Promise.all([
+          isBiometricAuthAvailable(),
+          isBiometricLoginConfigured(),
+        ]);
+        if (!cancelled) {
+          setBioShowButton(Boolean(avail && configured));
+        }
+      } catch {
+        if (!cancelled) setBioShowButton(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -36,8 +104,26 @@ export default function Login() {
     try {
       await signIn(email, password);
       router.replace("/home");
-    } catch (e: any) {
-      setError(e.message || "Error al iniciar sesión");
+      offerEnableBiometricAfterPasswordLogin(email, password);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Error al iniciar sesión");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const { email: e, password: p } = await unlockSavedCredentialsWithBiometrics();
+      await signIn(e, p);
+      router.replace("/home");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "No se pudo iniciar sesión";
+      if (msg !== "Cancelado") {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -124,6 +210,21 @@ export default function Login() {
             </View>
           ) : null}
 
+          {bioShowButton && Platform.OS !== "web" ? (
+            <Pressable
+              onPress={handleBiometricLogin}
+              disabled={loading}
+              style={({ pressed }) => [
+                s.buttonOutline,
+                loading && s.buttonDisabled,
+                pressed && !loading && s.buttonOutlinePressed,
+              ]}
+            >
+              <Ionicons name="finger-print-outline" size={22} color="#1FA774" />
+              <Text style={s.buttonOutlineText}>Ingresar con login del celular</Text>
+            </Pressable>
+          ) : null}
+
           <Pressable
             onPress={handleLogin}
             disabled={loading}
@@ -131,6 +232,7 @@ export default function Login() {
               s.button,
               loading && s.buttonDisabled,
               pressed && !loading && s.buttonPressed,
+              bioShowButton && Platform.OS !== "web" && { marginTop: 12 },
             ]}
           >
             {loading ? (
@@ -245,6 +347,27 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
     flex: 1,
+  },
+
+  buttonOutline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#1FA774",
+    backgroundColor: "rgba(31,167,116,0.06)",
+    marginBottom: 4,
+  },
+  buttonOutlinePressed: {
+    backgroundColor: "rgba(31,167,116,0.12)",
+  },
+  buttonOutlineText: {
+    color: "#1FA774",
+    fontSize: 16,
+    fontWeight: "700",
   },
 
   button: {

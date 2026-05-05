@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { autenticacionContext } from "../src/context/AutenticacionContext";
+import { clearBiometricLoginCredentials } from "../src/Services/biometricLogin.service";
 import { updateMe } from "../src/Services/usuarios.service";
 import { safeBack } from "../src/utils/navigation";
 
@@ -47,12 +48,15 @@ export default function CambiarContrasenaScreen() {
         currentPassword: actual,
         password: nueva,
       });
+      await clearBiometricLoginCredentials();
       setActual("");
       setNueva("");
       setRepite("");
-      Alert.alert("Listo", "Tu contraseña se actualizó.", [
-        { text: "OK", onPress: () => safeBack(router, "/(tabs)/perfil") },
-      ]);
+      Alert.alert(
+        "Listo",
+        "Tu contraseña se actualizó. Si usabas Face ID o huella para entrar, activalo de nuevo desde el inicio de sesión.",
+        [{ text: "OK", onPress: () => safeBack(router, "/(tabs)/perfil") }]
+      );
     } catch (err: unknown) {
       Alert.alert("Error", err instanceof Error ? err.message : "No se pudo cambiar la contraseña.");
     } finally {
